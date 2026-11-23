@@ -124,8 +124,9 @@ async def run(args: argparse.Namespace) -> Result:
         machine=f"{platform.system()} {platform.machine()}, Python {platform.python_version()}",
     )
     if args.limit:
-        per_user = max_admissible(Algorithm(args.algorithm), parse_limit(args.limit), elapsed)
-        result.admitted_max = per_user * args.users
+        per_key = max_admissible(Algorithm(args.algorithm), parse_limit(args.limit), elapsed)
+        keys = args.limit_keys if args.limit_keys is not None else args.users
+        result.admitted_max = per_key * keys
         result.over_admitted = result.admitted > result.admitted_max
     return result
 
@@ -138,7 +139,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--users", type=int, default=100)
     parser.add_argument("--user-prefix", default="lt-")
     parser.add_argument("--timeout", type=float, default=10)
-    parser.add_argument("--limit", help="the server's per-user limit, e.g. 10/10s")
+    parser.add_argument("--limit", help="the binding limit on the server, e.g. 10/10s")
+    parser.add_argument(
+        "--limit-keys",
+        type=int,
+        help="how many independent keys that limit applies to (default: --users). "
+        "Use 1 when one per-IP limit covers all traffic from this machine.",
+    )
     parser.add_argument("--algorithm", default="token_bucket", choices=[a.value for a in Algorithm])
     parser.add_argument("--json", help="also write the result to this file")
     args = parser.parse_args(argv)

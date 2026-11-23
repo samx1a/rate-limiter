@@ -26,12 +26,17 @@ LIMIT = 100
 SPEC = LimitSpec(LIMIT, 10**7)
 
 
-def worker(algorithm: str, prefix: str, barrier: Barrier, results: mp.Queue[int]) -> None:
-    client = redis.Redis.from_url(REDIS_URL)
-    limiter = build_redis_limiter(algorithm, SPEC, client, prefix=prefix)
-    barrier.wait()  # start together for maximum contention
-    admitted = sum(limiter.hit("hot").allowed for _ in range(HITS_PER_PROCESS))
-    results.put(admitted)
+def worker(algorithm: str, prefix: str, barrier: Barrier, results: mp.Queue[int | str]) -> None:
+    try:
+        client = redis.Redis.from_url(REDIS_URL, socket_timeout=10)
+        client.ping()  # connect (and TLS handshake) before the start signal
+        limiter = build_redis_limiter(algorithm, SPEC, client, prefix=prefix)
+        barrier.wait(timeout=60)  # start together for maximum contention
+        admitted = sum(limiter.hit("hot").allowed for _ in range(HITS_PER_PROCESS))
+        client.close()
+        results.put(admitted)
+    except Exception as exc:  # report, don't vanish: the parent shows the error
+        results.put(f"{type(exc).__name__}: {exc}")
 
 
 @pytest.mark.parametrize("algorithm", ["fixed_window", "sliding_window", "token_bucket"])
@@ -41,7 +46,7 @@ def test_processes_never_exceed_the_limit_together(
     ctx = mp.get_context("spawn")
     prefix = f"test-dist-{uuid.uuid4().hex[:8]}"
     barrier = ctx.Barrier(PROCESSES)
-    results: mp.Queue[int] = ctx.Queue()
+    results: mp.Queue[int | str] = ctx.Queue()
     procs = [
         ctx.Process(target=worker, args=(algorithm, prefix, barrier, results))
         for _ in range(PROCESSES)
@@ -49,7 +54,7 @@ def test_processes_never_exceed_the_limit_together(
     try:
         for p in procs:
             p.start()
-        per_process = [results.get(timeout=30) for _ in procs]
+        replies = [results.get(timeout=120) for _ in procs]
         for p in procs:
             p.join(timeout=10)
     finally:
@@ -57,5 +62,8 @@ def test_processes_never_exceed_the_limit_together(
         if keys:
             redis_client.delete(*keys)
 
+    errors = [r for r in replies if isinstance(r, str)]
+    assert not errors, errors
+    per_process = [r for r in replies if isinstance(r, int)]
     assert sum(per_process) == LIMIT
     assert len([n for n in per_process if n > 0]) > 1  # really was shared, not one winner

@@ -32,6 +32,9 @@ class Settings:
     backend: Backend = Backend.MEMORY
     redis_url: str | None = None
     key_prefix: str = "rl"
+    # Per-command Redis timeout. Keep it short in production (same region as Redis);
+    # raise it when Redis is far away, e.g. running tests against a cloud database.
+    redis_timeout: float = 0.25
     algorithm: Algorithm = Algorithm.TOKEN_BUCKET
     ip_limit: LimitSpec = DEFAULT_IP_LIMIT
     user_limit: LimitSpec = DEFAULT_USER_LIMIT
@@ -55,6 +58,11 @@ class Settings:
             backend=Backend(backend),
             redis_url=redis_url,
             key_prefix=env.get("RATE_LIMIT_PREFIX", defaults.key_prefix),
+            redis_timeout=(
+                int(env["REDIS_TIMEOUT_MS"]) / 1000
+                if "REDIS_TIMEOUT_MS" in env
+                else defaults.redis_timeout
+            ),
             algorithm=Algorithm(env.get("RATE_LIMIT_ALGORITHM", defaults.algorithm)),
             ip_limit=parse_limit(env["IP_LIMIT"]) if "IP_LIMIT" in env else defaults.ip_limit,
             user_limit=(

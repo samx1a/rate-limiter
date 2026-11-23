@@ -22,6 +22,7 @@ def test_two_app_instances_share_limits_through_redis(
         ip_limit=LimitSpec(100, 60),
         user_limit=LimitSpec(3, 60),
         trusted_ip_header="x-real-ip",
+        redis_timeout=5.0,  # the test may run against a far-away Redis
     )
     server_a, server_b = TestClient(create_app(settings)), TestClient(create_app(settings))
     headers = {"x-real-ip": "203.0.113.1", "x-user-id": "alice"}
@@ -31,5 +32,5 @@ def test_two_app_instances_share_limits_through_redis(
         server_a.get("/api/hello", headers=headers).status_code,
         server_b.get("/api/hello", headers=headers).status_code,
     ]
-    assert codes == [200, 200, 200, 429]
+    assert codes == [200, 200, 200, 429]  # 200s here are real decisions, not fail-open
     assert server_a.get("/api/info").json()["backend"] == "redis"

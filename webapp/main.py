@@ -4,6 +4,7 @@ No ``from __future__ import annotations`` here: FastAPI reads parameter annotati
 runtime, and string annotations cannot see aliases defined inside ``create_app``.
 """
 
+import time
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -25,7 +26,7 @@ DEMO_PAGE = (Path(__file__).parent / "static" / "index.html").read_text(encoding
 def build_service(settings: Settings) -> RateLimitService:
     if settings.backend is Backend.REDIS:
         assert settings.redis_url  # checked in Settings
-        client = connect(settings.redis_url)
+        client = connect(settings.redis_url, timeout=settings.redis_timeout)
 
         def make(spec: LimitSpec) -> RateLimiter:
             return build_redis_limiter(settings.algorithm, spec, client, prefix=settings.key_prefix)
@@ -66,6 +67,7 @@ def create_app(
     # A plain (sync) dependency: FastAPI runs it in a worker thread, so a slow
     # limiter store never blocks the event loop.
     def rate_limit(identity: Annotated[Identity, Depends(identify)], response: Response) -> Verdict:
+        started = time.perf_counter()
         try:
             verdict = service.check(identity)
         except LimiterUnavailable as exc:  # only reached when FAIL_OPEN=false
@@ -75,6 +77,10 @@ def create_app(
                 headers={"Retry-After": "1"},
             ) from exc
         headers = rate_limit_headers(verdict, service.policies)
+        # How long the limit check took, visible in browser dev tools. This is how the
+        # Redis round trip was measured in production (see docs/LOAD_TEST.md).
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        headers["Server-Timing"] = f"ratelimit;dur={elapsed_ms:.2f}"
         if not verdict.allowed:
             binding = verdict.binding
             raise HTTPException(

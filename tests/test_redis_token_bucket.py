@@ -79,7 +79,9 @@ def test_keys_expire_once_the_bucket_would_be_full(redis_client: redis.Redis, pr
     bucket, _ = make(redis_client, prefix, capacity=10, rate=2.0)
     bucket.hit("k", cost=4)  # 4 tokens to refill at 2/s = 2s, plus 1s margin
     ttl_ms = redis_client.pttl(bucket.redis_key("k"))
-    assert 2_900 <= ttl_ms <= 3_000
+    # Upper bound is exact; the lower bound leaves room for the network round trip
+    # between the script and PTTL when Redis is remote.
+    assert 2_000 < ttl_ms <= 3_000
 
 
 def test_uses_the_redis_server_clock_by_default(redis_client: redis.Redis, prefix: str) -> None:

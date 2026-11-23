@@ -1,0 +1,26 @@
+{
+  "url": "https://rate-limiter-lac.vercel.app/api/hello",
+  "duration_s": 20.26,
+  "concurrency": 10,
+  "users": 50,
+  "requests": 658,
+  "statuses": {
+    "200": 79,
+    "429": 579
+  },
+  "transport_errors": {},
+  "latency_ms": {
+    "p50": 299.61,
+    "p95": 349.55,
+    "p99": 448.51,
+    "max": 736.53,
+    "mean": 306.96
+  },
+  "requests_per_s": 32.5,
+  "errors": 0,
+  "admitted": 79,
+  "admitted_max": 80,
+  "over_admitted": false,
+  "started_at": "2026-11-23T14:21:05+00:00",
+  "machine": "Darwin arm64, Python 3.11.13"
+}

@@ -170,16 +170,17 @@ def build_redis_limiter(
             raise ValueError("the naive counter is a teaching baseline; it has no Redis version")
 
 
-def connect(url: str) -> redis.Redis:
+def connect(url: str, timeout: float = 0.25, connect_timeout: float = 1.0) -> redis.Redis:
     """A client tuned for a limiter on the request path: fail fast, never hang.
 
     A rate limiter must not become the slowest part of a request. Short timeouts plus
     fail-open in the service mean a Redis outage degrades to "no limiting", not to
-    "every request hangs".
+    "every request hangs". Connecting gets a bit longer than each command because a
+    new TLS connection (rediss://) needs a handshake first.
     """
     return redis.Redis.from_url(
         url,
-        socket_timeout=0.25,
-        socket_connect_timeout=0.25,
+        socket_timeout=timeout,
+        socket_connect_timeout=connect_timeout,
         health_check_interval=30,
     )

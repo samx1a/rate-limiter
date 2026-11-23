@@ -4,9 +4,12 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-.env
-.env.*
-!.env.example
 .vercel/
 .DS_Store
+
+# secrets stay local
+.env*
+!.env.example
+
+# ad-hoc load test output (recorded runs live in docs/loadtest/)
 loadtest/results/*.json

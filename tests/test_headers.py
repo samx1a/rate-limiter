@@ -30,6 +30,7 @@ def test_allowed_responses_carry_limit_headers() -> None:
     assert first.headers["RateLimit-Reset"] == "10"  # 1 token at 3 per 30s = 10s
     assert first.headers["RateLimit-Policy"] == '100;w=60;name="ip", 3;w=30;name="user"'
     assert "Retry-After" not in first.headers
+    assert first.headers["Server-Timing"].startswith("ratelimit;dur=")
     second = c.get("/api/hello", headers=HEADERS)
     assert second.headers["RateLimit-Remaining"] == "1"
 
