@@ -4,9 +4,11 @@ No ``from __future__ import annotations`` here: FastAPI reads parameter annotati
 runtime, and string annotations cannot see aliases defined inside ``create_app``.
 """
 
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse
 
 from ratelimit.decision import LimiterUnavailable, RateLimiter
 from ratelimit.limits import LimitSpec, build_limiter
@@ -15,6 +17,9 @@ from ratelimit.service import Identity, Policy, RateLimitService, Scope, Verdict
 from webapp.headers import rate_limit_headers
 from webapp.identity import InvalidIdentity, client_ip, user_from_headers
 from webapp.settings import Backend, Settings
+from webapp.simulate import Scenario, simulate
+
+DEMO_PAGE = (Path(__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
 
 
 def build_service(settings: Settings) -> RateLimitService:
@@ -86,6 +91,14 @@ def create_app(
         return verdict
 
     Limited = Annotated[Verdict, Depends(rate_limit)]
+
+    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+    def demo_page() -> HTMLResponse:
+        return HTMLResponse(DEMO_PAGE, headers={"Cache-Control": "public, max-age=300"})
+
+    @app.get("/api/simulate")
+    def simulate_route(scenario: Scenario = Scenario.EDGE_BURST) -> dict[str, Any]:
+        return simulate(scenario)
 
     @app.get("/api/health")
     def health() -> dict[str, bool]:
