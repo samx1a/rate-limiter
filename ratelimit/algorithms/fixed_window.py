@@ -63,8 +63,9 @@ class FixedWindow:
             used = 0  # a new window has started
 
         if used + cost > self._limit:
+            retry = math.inf if cost > self._limit else window_ends_in  # inf: can never fit
             return Decision(
-                False, self._limit, self._limit - used, window_ends_in, retry_after=window_ends_in
+                False, self._limit, self._limit - used, window_ends_in, retry_after=retry
             )
         used += cost
         self._state[key] = (index, used)

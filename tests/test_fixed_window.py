@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from ratelimit import FakeClock
@@ -60,6 +62,11 @@ def test_blocked_requests_do_not_count_and_cost_is_respected() -> None:
     assert limiter.hit("k", cost=3).remaining == 1
     assert not limiter.hit("k", cost=2).allowed
     assert limiter.hit("k", cost=1).allowed
+
+
+def test_cost_above_limit_can_never_succeed() -> None:
+    limiter, _ = make(limit=2)
+    assert limiter.hit("k", cost=3).retry_after == math.inf
 
 
 @pytest.mark.parametrize(("limit", "window"), [(0, 1.0), (1, 0.0), (1, -1.0)])

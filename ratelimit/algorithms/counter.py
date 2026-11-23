@@ -18,8 +18,7 @@ class NaiveCounter:
             raise ValueError("limit must be >= 1")
         self._limit = limit
         self._counts: dict[str, int] = {}
-        # One lock guards the whole read-decide-write in hit(). The clock is read
-        # inside the lock, so state is always updated in time order.
+        # One lock guards the whole read-decide-write in hit().
         self._lock = threading.Lock()
 
     @property
@@ -41,4 +40,5 @@ class NaiveCounter:
         return Decision(True, self._limit, self._limit - used, INF)
 
     def reset(self, key: str) -> None:
-        self._counts.pop(key, None)
+        with self._lock:
+            self._counts.pop(key, None)
