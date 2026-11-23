@@ -6,10 +6,11 @@ runtime, and string annotations cannot see aliases defined inside ``create_app``
 
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 
 from ratelimit.limits import build_limiter
 from ratelimit.service import Identity, Policy, RateLimitService, Scope, Verdict
+from webapp.headers import rate_limit_headers
 from webapp.identity import InvalidIdentity, client_ip, user_from_headers
 from webapp.settings import Settings
 
@@ -53,10 +54,22 @@ def create_app(
 
     # A plain (sync) dependency: FastAPI runs it in a worker thread, so a slow
     # limiter store never blocks the event loop.
-    def rate_limit(identity: Annotated[Identity, Depends(identify)]) -> Verdict:
+    def rate_limit(identity: Annotated[Identity, Depends(identify)], response: Response) -> Verdict:
         verdict = service.check(identity)
+        headers = rate_limit_headers(verdict, service.policies)
         if not verdict.allowed:
-            raise HTTPException(status_code=429, detail="Too many requests")
+            binding = verdict.binding
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error": "rate_limited",
+                    "message": "Too many requests. Slow down and retry later.",
+                    "policy": binding.policy.name if binding else None,
+                    "retry_after": int(headers.get("Retry-After", "0")) or None,
+                },
+                headers=headers,
+            )
+        response.headers.update(headers)
         return verdict
 
     Limited = Annotated[Verdict, Depends(rate_limit)]
