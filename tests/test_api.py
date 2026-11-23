@@ -1,8 +1,9 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from ratelimit.limits import LimitSpec
 from webapp.main import create_app
-from webapp.settings import Settings
+from webapp.settings import Backend, Settings
 
 
 def client(ip_limit: int = 100, user_limit: int = 3) -> TestClient:
@@ -71,3 +72,16 @@ def test_settings_from_env() -> None:
     assert s.ip_limit == LimitSpec(100, 60) and s.user_limit == LimitSpec(5, 10)
     assert s.trusted_ip_header == "x-real-ip" and s.fail_open is False
     assert Settings.from_env({}) == Settings()
+
+
+def test_settings_pick_redis_when_a_url_is_set() -> None:
+    s = Settings.from_env({"REDIS_URL": "redis://example:6379/0"})
+    assert str(s.backend) == "redis"
+    assert str(Settings.from_env({}).backend) == "memory"
+
+
+def test_redis_backend_needs_a_url_and_a_redis_algorithm() -> None:
+    with pytest.raises(ValueError):
+        Settings(backend=Backend.REDIS)
+    with pytest.raises(ValueError):
+        Settings.from_env({"REDIS_URL": "redis://x:1/0", "RATE_LIMIT_ALGORITHM": "counter"})

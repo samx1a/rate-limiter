@@ -18,7 +18,8 @@ from typing import Any
 
 import redis
 
-from ratelimit.decision import Decision, validate_cost
+from ratelimit.decision import Decision, RateLimiter, validate_cost
+from ratelimit.limits import Algorithm, LimitSpec
 
 NowMs = Callable[[], float]
 
@@ -138,3 +139,42 @@ class RedisSlidingWindow(_RedisLimiter):
         validate_cost(cost)
         args = [self._limit, repr(self._window_ms), cost, self._now_arg(), uuid.uuid4().hex]
         return self._run(key, args)
+
+
+def build_redis_limiter(
+    algorithm: Algorithm | str,
+    spec: LimitSpec,
+    client: redis.Redis,
+    *,
+    prefix: str = "rl",
+    now_ms: NowMs | None = None,
+) -> RateLimiter:
+    """The Redis twin of ``ratelimit.limits.build_limiter``."""
+    match Algorithm(algorithm):
+        case Algorithm.FIXED_WINDOW:
+            return RedisFixedWindow(
+                client, spec.requests, spec.period, prefix=prefix, now_ms=now_ms
+            )
+        case Algorithm.SLIDING_WINDOW:
+            return RedisSlidingWindow(
+                client, spec.requests, spec.period, prefix=prefix, now_ms=now_ms
+            )
+        case Algorithm.TOKEN_BUCKET:
+            return RedisTokenBucket(client, spec.requests, spec.rate, prefix=prefix, now_ms=now_ms)
+        case Algorithm.COUNTER:
+            raise ValueError("the naive counter is a teaching baseline; it has no Redis version")
+
+
+def connect(url: str) -> redis.Redis:
+    """A client tuned for a limiter on the request path: fail fast, never hang.
+
+    A rate limiter must not become the slowest part of a request. Short timeouts plus
+    fail-open in the service mean a Redis outage degrades to "no limiting", not to
+    "every request hangs".
+    """
+    return redis.Redis.from_url(
+        url,
+        socket_timeout=0.25,
+        socket_connect_timeout=0.25,
+        health_check_interval=30,
+    )

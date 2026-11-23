@@ -8,27 +8,33 @@ from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 
-from ratelimit.limits import build_limiter
+from ratelimit.decision import RateLimiter
+from ratelimit.limits import LimitSpec, build_limiter
+from ratelimit.redis_limiters import build_redis_limiter, connect
 from ratelimit.service import Identity, Policy, RateLimitService, Scope, Verdict
 from webapp.headers import rate_limit_headers
 from webapp.identity import InvalidIdentity, client_ip, user_from_headers
-from webapp.settings import Settings
+from webapp.settings import Backend, Settings
 
 
 def build_service(settings: Settings) -> RateLimitService:
+    if settings.backend is Backend.REDIS:
+        assert settings.redis_url  # checked in Settings
+        client = connect(settings.redis_url)
+
+        def make(spec: LimitSpec) -> RateLimiter:
+            return build_redis_limiter(settings.algorithm, spec, client, prefix=settings.key_prefix)
+
+    else:
+
+        def make(spec: LimitSpec) -> RateLimiter:
+            return build_limiter(settings.algorithm, spec)
+
     return RateLimitService(
         [
+            Policy("ip", Scope.IP, make(settings.ip_limit), period=settings.ip_limit.period),
             Policy(
-                "ip",
-                Scope.IP,
-                build_limiter(settings.algorithm, settings.ip_limit),
-                period=settings.ip_limit.period,
-            ),
-            Policy(
-                "user",
-                Scope.USER,
-                build_limiter(settings.algorithm, settings.user_limit),
-                period=settings.user_limit.period,
+                "user", Scope.USER, make(settings.user_limit), period=settings.user_limit.period
             ),
         ],
         fail_open=settings.fail_open,
@@ -81,6 +87,7 @@ def create_app(
     @app.get("/api/info")
     def info() -> dict[str, Any]:
         return {
+            "backend": str(settings.backend),
             "algorithm": str(settings.algorithm),
             "limits": {"ip": str(settings.ip_limit), "user": str(settings.user_limit)},
             "fail_open": settings.fail_open,
