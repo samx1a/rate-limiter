@@ -1,0 +1,26 @@
+{
+  "url": "http://127.0.0.1:8101/api/hello",
+  "duration_s": 20.09,
+  "concurrency": 100,
+  "users": 1000,
+  "requests": 50020,
+  "statuses": {
+    "200": 29000,
+    "429": 21020
+  },
+  "transport_errors": {},
+  "latency_ms": {
+    "p50": 38.71,
+    "p95": 47.79,
+    "p99": 55.84,
+    "max": 101.06,
+    "mean": 40.02
+  },
+  "requests_per_s": 2490.0,
+  "errors": 0,
+  "admitted": 29000,
+  "admitted_max": 30000,
+  "over_admitted": false,
+  "started_at": "2026-11-23T13:28:14+00:00",
+  "machine": "Darwin arm64, Python 3.11.13"
+}
