@@ -11,7 +11,8 @@ different clocks still agree. Tests can pass ``now_ms`` to control time.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+import uuid
+from collections.abc import Callable, Sequence
 from importlib import resources
 from typing import Any
 
@@ -33,7 +34,46 @@ def _ms_to_s(value: Any) -> float:
     return math.inf if ms < 0 else ms / 1000
 
 
-class RedisTokenBucket:
+class _RedisLimiter:
+    """Shared plumbing: key naming, the clock argument, decoding the script reply."""
+
+    script_name: str
+    key_tag: str
+
+    def __init__(
+        self, client: redis.Redis, limit: int, *, prefix: str, now_ms: NowMs | None
+    ) -> None:
+        if limit < 1:
+            raise ValueError("limit must be >= 1")
+        self._limit = limit
+        self._prefix = prefix
+        self._now_ms = now_ms
+        self._script = load_script(client, self.script_name)
+
+    @property
+    def limit(self) -> int:
+        return self._limit
+
+    def redis_key(self, key: str) -> str:
+        return f"{self._prefix}:{self.key_tag}:{key}"
+
+    def _now_arg(self) -> str:
+        return "" if self._now_ms is None else repr(float(self._now_ms()))
+
+    def _run(self, key: str, args: Sequence[Any]) -> Decision:
+        allowed, remaining, retry_ms, reset_ms = self._script(
+            keys=[self.redis_key(key)], args=list(args)
+        )
+        reset = _ms_to_s(reset_ms)
+        if int(allowed):
+            return Decision(True, self._limit, int(remaining), reset)
+        return Decision(False, self._limit, int(remaining), reset, retry_after=_ms_to_s(retry_ms))
+
+
+class RedisTokenBucket(_RedisLimiter):
+    script_name = "token_bucket"
+    key_tag = "tb"
+
     def __init__(
         self,
         client: redis.Redis,
@@ -43,35 +83,58 @@ class RedisTokenBucket:
         prefix: str = "rl",
         now_ms: NowMs | None = None,
     ) -> None:
-        if capacity < 1:
-            raise ValueError("capacity must be >= 1")
         if refill_rate <= 0:
             raise ValueError("refill_rate must be > 0 tokens per second")
-        self._capacity = capacity
+        super().__init__(client, capacity, prefix=prefix, now_ms=now_ms)
         self._rate = refill_rate
-        self._prefix = prefix
-        self._now_ms = now_ms
-        self._script = load_script(client, "token_bucket")
-
-    @property
-    def limit(self) -> int:
-        return self._capacity
-
-    def redis_key(self, key: str) -> str:
-        return f"{self._prefix}:tb:{key}"
 
     def hit(self, key: str, cost: int = 1) -> Decision:
         validate_cost(cost)
-        now = "" if self._now_ms is None else repr(float(self._now_ms()))
-        allowed, remaining, retry_ms, reset_ms = self._script(
-            keys=[self.redis_key(key)], args=[self._capacity, repr(self._rate), cost, now]
-        )
-        if int(allowed):
-            return Decision(True, self._capacity, int(remaining), _ms_to_s(reset_ms))
-        return Decision(
-            False,
-            self._capacity,
-            int(remaining),
-            _ms_to_s(reset_ms),
-            retry_after=_ms_to_s(retry_ms),
-        )
+        return self._run(key, [self._limit, repr(self._rate), cost, self._now_arg()])
+
+
+class RedisFixedWindow(_RedisLimiter):
+    script_name = "fixed_window"
+    key_tag = "fw"
+
+    def __init__(
+        self,
+        client: redis.Redis,
+        limit: int,
+        window: float,
+        *,
+        prefix: str = "rl",
+        now_ms: NowMs | None = None,
+    ) -> None:
+        if window <= 0:
+            raise ValueError("window must be > 0 seconds")
+        super().__init__(client, limit, prefix=prefix, now_ms=now_ms)
+        self._window_ms = window * 1000
+
+    def hit(self, key: str, cost: int = 1) -> Decision:
+        validate_cost(cost)
+        return self._run(key, [self._limit, repr(self._window_ms), cost, self._now_arg()])
+
+
+class RedisSlidingWindow(_RedisLimiter):
+    script_name = "sliding_window"
+    key_tag = "sw"
+
+    def __init__(
+        self,
+        client: redis.Redis,
+        limit: int,
+        window: float,
+        *,
+        prefix: str = "rl",
+        now_ms: NowMs | None = None,
+    ) -> None:
+        if window <= 0:
+            raise ValueError("window must be > 0 seconds")
+        super().__init__(client, limit, prefix=prefix, now_ms=now_ms)
+        self._window_ms = window * 1000
+
+    def hit(self, key: str, cost: int = 1) -> Decision:
+        validate_cost(cost)
+        args = [self._limit, repr(self._window_ms), cost, self._now_arg(), uuid.uuid4().hex]
+        return self._run(key, args)
