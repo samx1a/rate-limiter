@@ -21,18 +21,24 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
-from ratelimit.decision import Decision, RateLimiter
+from ratelimit.decision import Decision, LimiterUnavailable, RateLimiter
 
 log = logging.getLogger(__name__)
+
+__all__ = [
+    "Identity",
+    "LimiterUnavailable",
+    "Policy",
+    "PolicyResult",
+    "RateLimitService",
+    "Scope",
+    "Verdict",
+]
 
 
 class Scope(StrEnum):
     IP = "ip"
     USER = "user"
-
-
-class LimiterUnavailable(Exception):
-    """The limiter's backing store (e.g. Redis) could not be reached."""
 
 
 @dataclass(frozen=True, slots=True)

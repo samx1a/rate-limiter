@@ -46,6 +46,10 @@ class RateLimiter(Protocol):
     def hit(self, key: str, cost: int = 1) -> Decision: ...
 
 
+class LimiterUnavailable(Exception):
+    """The limiter's backing store (e.g. Redis) could not be reached."""
+
+
 def validate_cost(cost: int) -> None:
     if not isinstance(cost, int) or isinstance(cost, bool) or cost < 1:
         raise ValueError(f"cost must be a positive integer, got {cost!r}")

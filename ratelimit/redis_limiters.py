@@ -18,7 +18,7 @@ from typing import Any
 
 import redis
 
-from ratelimit.decision import Decision, RateLimiter, validate_cost
+from ratelimit.decision import Decision, LimiterUnavailable, RateLimiter, validate_cost
 from ratelimit.limits import Algorithm, LimitSpec
 
 NowMs = Callable[[], float]
@@ -62,9 +62,14 @@ class _RedisLimiter:
         return "" if self._now_ms is None else repr(float(self._now_ms()))
 
     def _run(self, key: str, args: Sequence[Any]) -> Decision:
-        allowed, remaining, retry_ms, reset_ms = self._script(
-            keys=[self.redis_key(key)], args=list(args)
-        )
+        try:
+            allowed, remaining, retry_ms, reset_ms = self._script(
+                keys=[self.redis_key(key)], args=list(args)
+            )
+        except (redis.ConnectionError, redis.TimeoutError) as exc:
+            # Unreachable or too slow: the service decides whether to fail open or
+            # closed. Other errors (e.g. a script bug) are real bugs and propagate.
+            raise LimiterUnavailable(str(exc)) from exc
         reset = _ms_to_s(reset_ms)
         if int(allowed):
             return Decision(True, self._limit, int(remaining), reset)

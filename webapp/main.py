@@ -8,7 +8,7 @@ from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 
-from ratelimit.decision import RateLimiter
+from ratelimit.decision import LimiterUnavailable, RateLimiter
 from ratelimit.limits import LimitSpec, build_limiter
 from ratelimit.redis_limiters import build_redis_limiter, connect
 from ratelimit.service import Identity, Policy, RateLimitService, Scope, Verdict
@@ -61,7 +61,14 @@ def create_app(
     # A plain (sync) dependency: FastAPI runs it in a worker thread, so a slow
     # limiter store never blocks the event loop.
     def rate_limit(identity: Annotated[Identity, Depends(identify)], response: Response) -> Verdict:
-        verdict = service.check(identity)
+        try:
+            verdict = service.check(identity)
+        except LimiterUnavailable as exc:  # only reached when FAIL_OPEN=false
+            raise HTTPException(
+                status_code=503,
+                detail={"error": "limiter_unavailable", "message": "Try again shortly."},
+                headers={"Retry-After": "1"},
+            ) from exc
         headers = rate_limit_headers(verdict, service.policies)
         if not verdict.allowed:
             binding = verdict.binding
