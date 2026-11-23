@@ -20,6 +20,7 @@ a request is not blocked by rounding error.
 from __future__ import annotations
 
 import math
+import threading
 
 from ratelimit.clock import Clock, MonotonicClock
 from ratelimit.decision import Decision, validate_cost
@@ -37,6 +38,9 @@ class TokenBucket:
         self._rate = refill_rate
         self._clock = clock or MonotonicClock()
         self._buckets: dict[str, tuple[float, float]] = {}  # key -> (tokens, last refill)
+        # One lock guards the whole read-decide-write in hit(). The clock is read
+        # inside the lock, so state is always updated in time order.
+        self._lock = threading.Lock()
 
     @property
     def limit(self) -> int:
@@ -48,6 +52,10 @@ class TokenBucket:
 
     def hit(self, key: str, cost: int = 1) -> Decision:
         validate_cost(cost)
+        with self._lock:
+            return self._hit(key, cost)
+
+    def _hit(self, key: str, cost: int) -> Decision:
         now = self._clock.now()
         tokens, last = self._buckets.get(key, (float(self._capacity), now))
 

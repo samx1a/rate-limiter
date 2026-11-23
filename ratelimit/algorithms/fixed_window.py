@@ -23,6 +23,7 @@ one ``INCR`` with an expiry.
 from __future__ import annotations
 
 import math
+import threading
 
 from ratelimit.clock import Clock, MonotonicClock
 from ratelimit.decision import Decision, validate_cost
@@ -39,6 +40,9 @@ class FixedWindow:
         self._clock = clock or MonotonicClock()
         # key -> (index of the window the count belongs to, count)
         self._state: dict[str, tuple[int, int]] = {}
+        # One lock guards the whole read-decide-write in hit(). The clock is read
+        # inside the lock, so state is always updated in time order.
+        self._lock = threading.Lock()
 
     @property
     def limit(self) -> int:
@@ -46,6 +50,10 @@ class FixedWindow:
 
     def hit(self, key: str, cost: int = 1) -> Decision:
         validate_cost(cost)
+        with self._lock:
+            return self._hit(key, cost)
+
+    def _hit(self, key: str, cost: int) -> Decision:
         now = self._clock.now()
         index = math.floor(now / self._window)
         window_ends_in = (index + 1) * self._window - now

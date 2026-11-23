@@ -21,6 +21,7 @@ limits (say 100k/hour per key) the counter is the better choice.
 from __future__ import annotations
 
 import math
+import threading
 from collections import deque
 
 from ratelimit.clock import Clock, MonotonicClock
@@ -38,6 +39,9 @@ class SlidingWindowLog:
         self._clock = clock or MonotonicClock()
         self._logs: dict[str, deque[tuple[float, int]]] = {}
         self._totals: dict[str, int] = {}
+        # One lock guards the whole read-decide-write in hit(). The clock is read
+        # inside the lock, so state is always updated in time order.
+        self._lock = threading.Lock()
 
     @property
     def limit(self) -> int:
@@ -45,6 +49,10 @@ class SlidingWindowLog:
 
     def hit(self, key: str, cost: int = 1) -> Decision:
         validate_cost(cost)
+        with self._lock:
+            return self._hit(key, cost)
+
+    def _hit(self, key: str, cost: int) -> Decision:
         now = self._clock.now()
         log = self._logs.setdefault(key, deque())
         total = self._totals.get(key, 0)
