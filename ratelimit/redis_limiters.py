@@ -146,6 +146,31 @@ class RedisSlidingWindow(_RedisLimiter):
         return self._run(key, args)
 
 
+class RedisSlidingCounter(_RedisLimiter):
+    """Sliding window counter: two counts per key, see ``algorithms/sliding_counter.py``."""
+
+    script_name = "sliding_counter"
+    key_tag = "sc"
+
+    def __init__(
+        self,
+        client: redis.Redis,
+        limit: int,
+        window: float,
+        *,
+        prefix: str = "rl",
+        now_ms: NowMs | None = None,
+    ) -> None:
+        if window <= 0:
+            raise ValueError("window must be > 0 seconds")
+        super().__init__(client, limit, prefix=prefix, now_ms=now_ms)
+        self._window_ms = window * 1000
+
+    def hit(self, key: str, cost: int = 1) -> Decision:
+        validate_cost(cost)
+        return self._run(key, [self._limit, repr(self._window_ms), cost, self._now_arg()])
+
+
 def build_redis_limiter(
     algorithm: Algorithm | str,
     spec: LimitSpec,
