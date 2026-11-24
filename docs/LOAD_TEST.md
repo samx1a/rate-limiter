@@ -63,6 +63,22 @@ its own limit check and send it back in a `Server-Timing` header. Over 40 reques
 The 45 ms one was probably a request that had to open a new connection to Redis (with
 a TLS handshake); the rest reused an open one.
 
+### After batching the two limits (2026-11-24)
+
+Later I changed the service to check the IP and user limits in one Lua script instead
+of two (see "One round trip for both limits" in the README). Measured the same way:
+
+| | requests | min | p50 | p90 | max |
+|-|----------|-----|-----|-----|-----|
+| user + IP limit, one script | 40 | 0.88 ms | 0.99 ms | 1.56 ms | 5.7 ms |
+| IP limit only (no user header), one script | 18 | 0.85 ms | 0.95 ms | 2.58 ms | 3.2 ms |
+
+Checking both limits now costs about the same as checking one. I can't compare these
+directly to the 3.3 ms from the day before, because the network between Vercel and
+Redis Cloud was faster this time: a plain `PING` from `/api/ready` took 0.6 ms. The
+fair comparison is the second row, measured right after the first one. One script is
+about 1 ms, so the old way (two scripts back to back) would be about 2 ms today.
+
 I also sent 20 requests at the same moment as one user, a couple of times. One run let
 10 through and the other let 11 through, and the rest got 429, even though Vercel can
 spread requests over more than one server instance. The bucket holds 10, and when the

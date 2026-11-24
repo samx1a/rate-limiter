@@ -185,8 +185,8 @@ limiting each address on its own would let someone pick a fresh one for every re
   the rest blocked. 10 is the bucket size; the 11th happens when the requests take
   more than a second to all arrive, because the bucket refills 1 token per second in
   the meantime. That's the limiter working, not leaking. Inside the server, the limit
-  check (two Redis calls) takes about 3 ms (it reports this in a `Server-Timing`
-  header).
+  check (one Redis script for both limits) takes about 1 ms (it reports this in a
+  `Server-Timing` header).
 
 ## Running it
 
