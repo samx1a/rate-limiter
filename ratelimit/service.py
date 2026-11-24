@@ -10,8 +10,11 @@ Rules:
 - Checking stops at the first block. A blocked IP therefore never spends a user's
   quota. (Policies checked *before* the block have spent theirs; that is the usual
   trade-off of sequential checks and keeps every check a single atomic step.)
-- If a limiter's store is unreachable, ``fail_open`` decides: allow and log (default,
-  favours availability) or raise ``LimiterUnavailable`` so the caller can refuse.
+- If a limiter's store is unreachable and the policy has a ``fallback`` (an in-memory
+  limiter), the fallback decides instead. Each server then limits on its own, so with
+  N servers a client can get up to N times the limit, but that beats no limit at all.
+- With no fallback, ``fail_open`` decides: allow and log (default, favours
+  availability) or raise ``LimiterUnavailable`` so the caller can refuse.
 """
 
 from __future__ import annotations
@@ -48,6 +51,7 @@ class Policy:
     limiter: RateLimiter
     period: float  # seconds; describes the policy in response headers
     cost: int = 1
+    fallback: RateLimiter | None = None  # used while ``limiter``'s store is down
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,18 +103,24 @@ class RateLimitService:
 
     def check(self, identity: Identity) -> Verdict:
         results: list[PolicyResult] = []
+        degraded = False
         for policy in self._policies:
             subject = identity.ip if policy.scope is Scope.IP else identity.user
             if subject is None:
                 continue  # anonymous request: user limits do not apply
+            key = self.key(policy, subject)
             try:
-                decision = policy.limiter.hit(self.key(policy, subject), policy.cost)
+                decision = policy.limiter.hit(key, policy.cost)
             except LimiterUnavailable:
-                if not self._fail_open:
+                if policy.fallback is not None:
+                    decision = policy.fallback.hit(key, policy.cost)
+                    degraded = True
+                elif not self._fail_open:
                     raise
-                log.warning("rate limiter %r unavailable; failing open", policy.name)
-                return Verdict(True, tuple(results), degraded=True)
+                else:
+                    log.warning("rate limiter %r unavailable; failing open", policy.name)
+                    return Verdict(True, tuple(results), degraded=True)
             results.append(PolicyResult(policy, decision))
             if not decision.allowed:
-                return Verdict(False, tuple(results))
-        return Verdict(True, tuple(results))
+                return Verdict(False, tuple(results), degraded=degraded)
+        return Verdict(True, tuple(results), degraded=degraded)

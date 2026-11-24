@@ -18,6 +18,9 @@ class BrokenLimiter:
     def hit(self, key: str, cost: int = 1) -> Decision:
         raise LimiterUnavailable("store down")
 
+    def reset(self, key: str) -> None:
+        raise LimiterUnavailable("store down")
+
 
 class RecordingLimiter:
     """Wraps a limiter and records the keys it was asked about."""
@@ -33,6 +36,9 @@ class RecordingLimiter:
     def hit(self, key: str, cost: int = 1) -> Decision:
         self.keys.append(key)
         return self.inner.hit(key, cost)
+
+    def reset(self, key: str) -> None:
+        self.inner.reset(key)
 
 
 def service(
@@ -114,6 +120,29 @@ def test_fail_closed_raises() -> None:
     svc = RateLimitService([Policy("ip", Scope.IP, BrokenLimiter(), period=1)], fail_open=False)
     with pytest.raises(LimiterUnavailable):
         svc.check(Identity(ip="1.2.3.4"))
+
+
+def test_fallback_limits_while_the_store_is_down() -> None:
+    fallback = RecordingLimiter(TokenBucket(2, 1.0, FakeClock()))
+    svc = RateLimitService(
+        [Policy("ip", Scope.IP, BrokenLimiter(), period=2, fallback=fallback)],
+        fail_open=False,  # never reached: the fallback answers instead
+    )
+    verdicts = [svc.check(Identity(ip="1.2.3.4")) for _ in range(3)]
+    assert [v.allowed for v in verdicts] == [True, True, False]
+    assert all(v.degraded for v in verdicts)
+    assert fallback.keys == ["ip:ip:1.2.3.4"] * 3  # same key as the store would use
+    assert verdicts[-1].binding is not None and verdicts[-1].binding.decision.remaining == 0
+
+
+def test_a_healthy_store_never_touches_the_fallback() -> None:
+    fallback = RecordingLimiter(TokenBucket(2, 1.0, FakeClock()))
+    svc = RateLimitService(
+        [Policy("ip", Scope.IP, TokenBucket(5, 1.0, FakeClock()), period=5, fallback=fallback)]
+    )
+    verdict = svc.check(Identity(ip="1.2.3.4"))
+    assert verdict.allowed and not verdict.degraded
+    assert fallback.keys == []
 
 
 def test_policy_names_must_be_unique() -> None:
