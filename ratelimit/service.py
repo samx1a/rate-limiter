@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from ratelimit.decision import Decision, LimiterUnavailable, RateLimiter
+from ratelimit.metrics import Metrics
 
 log = logging.getLogger(__name__)
 
@@ -85,13 +86,16 @@ class Verdict:
 
 
 class RateLimitService:
-    def __init__(self, policies: Sequence[Policy], *, fail_open: bool = True) -> None:
+    def __init__(
+        self, policies: Sequence[Policy], *, fail_open: bool = True, metrics: Metrics | None = None
+    ) -> None:
         names = [p.name for p in policies]
         if len(names) != len(set(names)):
             raise ValueError("policy names must be unique (they are part of the key)")
         order = {Scope.IP: 0, Scope.USER: 1}
         self._policies = tuple(sorted(policies, key=lambda p: order[p.scope]))
         self._fail_open = fail_open
+        self.metrics = metrics or Metrics()
         # Policies whose store is currently unreachable. Used to log an outage once
         # when it starts and once when it ends, not on every request in between.
         self._down: set[str] = set()
@@ -127,14 +131,19 @@ class RateLimitService:
             except LimiterUnavailable as exc:
                 self._mark_down(policy, exc)
                 if policy.fallback is not None:
+                    self.metrics.inc("ratelimit_fallback_total", policy=policy.name)
                     decision = policy.fallback.hit(key, cost)
                     degraded = True
                 elif not self._fail_open:
+                    self.metrics.inc("ratelimit_store_down_refused_total", policy=policy.name)
                     raise
                 else:
+                    self.metrics.inc("ratelimit_fail_open_total", policy=policy.name)
                     return Verdict(True, tuple(results), degraded=True)
             else:
                 self._mark_up(policy)
+            result = "allowed" if decision.allowed else "blocked"
+            self.metrics.inc("ratelimit_decisions_total", policy=policy.name, result=result)
             results.append(PolicyResult(policy, decision))
             if not decision.allowed:
                 return Verdict(False, tuple(results), degraded=degraded)
