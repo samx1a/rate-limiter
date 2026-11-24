@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum, StrEnum
+from typing import TypeVar
 
 from ratelimit.limits import Algorithm, LimitSpec, parse_limit
+
+T = TypeVar("T")
+E = TypeVar("E", bound=Enum)
+
+
+class ConfigError(ValueError):
+    """An environment variable has a value we can't use."""
 
 
 def _flag(value: str) -> bool:
@@ -15,7 +23,7 @@ def _flag(value: str) -> bool:
         return True
     if value.lower() in {"0", "false", "no", "off"}:
         return False
-    raise ValueError(f"expected a true/false value, got {value!r}")
+    raise ValueError("expected true or false")
 
 
 class Backend(StrEnum):
@@ -46,28 +54,65 @@ class Settings:
             raise ValueError("RATE_LIMIT_BACKEND=redis needs REDIS_URL")
         if self.backend is Backend.REDIS and self.algorithm is Algorithm.COUNTER:
             raise ValueError("the naive counter has no Redis version")
+        if self.redis_timeout <= 0:
+            raise ValueError("redis_timeout must be > 0 seconds")
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
+        """Read settings from environment variables.
+
+        A bad value fails at startup with a message naming the variable, instead of a
+        bare ``ValueError`` from deep inside a parser (or worse, a typo silently
+        falling back to a default).
+        """
         env = os.environ if env is None else env
         defaults = cls()
+
+        def read(name: str, parse: Callable[[str], T], default: T) -> T:
+            if name not in env:
+                return default
+            try:
+                return parse(env[name])
+            except ValueError as exc:
+                raise ConfigError(f"{name}={env[name]!r}: {exc}") from None
+
         redis_url = env.get("REDIS_URL") or None
         # Default to Redis whenever a Redis URL is configured.
-        backend = env.get("RATE_LIMIT_BACKEND") or ("redis" if redis_url else "memory")
-        return cls(
-            backend=Backend(backend),
-            redis_url=redis_url,
-            key_prefix=env.get("RATE_LIMIT_PREFIX", defaults.key_prefix),
-            redis_timeout=(
-                int(env["REDIS_TIMEOUT_MS"]) / 1000
-                if "REDIS_TIMEOUT_MS" in env
-                else defaults.redis_timeout
-            ),
-            algorithm=Algorithm(env.get("RATE_LIMIT_ALGORITHM", defaults.algorithm)),
-            ip_limit=parse_limit(env["IP_LIMIT"]) if "IP_LIMIT" in env else defaults.ip_limit,
-            user_limit=(
-                parse_limit(env["USER_LIMIT"]) if "USER_LIMIT" in env else defaults.user_limit
-            ),
-            trusted_ip_header=env.get("TRUSTED_IP_HEADER") or None,
-            fail_open=_flag(env["FAIL_OPEN"]) if "FAIL_OPEN" in env else defaults.fail_open,
-        )
+        backend_default = Backend.REDIS if redis_url else Backend.MEMORY
+        try:
+            return cls(
+                backend=read("RATE_LIMIT_BACKEND", _choice(Backend), backend_default),
+                redis_url=redis_url,
+                key_prefix=read("RATE_LIMIT_PREFIX", str, defaults.key_prefix),
+                redis_timeout=read("REDIS_TIMEOUT_MS", _millis, defaults.redis_timeout),
+                algorithm=read("RATE_LIMIT_ALGORITHM", _choice(Algorithm), defaults.algorithm),
+                ip_limit=read("IP_LIMIT", parse_limit, defaults.ip_limit),
+                user_limit=read("USER_LIMIT", parse_limit, defaults.user_limit),
+                trusted_ip_header=env.get("TRUSTED_IP_HEADER") or None,
+                fail_open=read("FAIL_OPEN", _flag, defaults.fail_open),
+            )
+        except ConfigError:
+            raise
+        except ValueError as exc:  # cross-field checks in __post_init__
+            raise ConfigError(str(exc)) from None
+
+
+def _choice(enum: type[E]) -> Callable[[str], E]:
+    def parse(value: str) -> E:
+        try:
+            return enum(value.strip().lower())
+        except ValueError:
+            options = ", ".join(str(m) for m in enum)
+            raise ValueError(f"expected one of: {options}") from None
+
+    return parse
+
+
+def _millis(value: str) -> float:
+    try:
+        ms = int(value)
+    except ValueError:
+        raise ValueError("expected a whole number of milliseconds") from None
+    if ms <= 0:
+        raise ValueError("must be > 0")
+    return ms / 1000
