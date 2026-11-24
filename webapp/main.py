@@ -20,7 +20,13 @@ from ratelimit.limits import LimitSpec, build_limiter
 from ratelimit.redis_limiters import build_redis_limiter, connect
 from ratelimit.service import Identity, Policy, RateLimitService, Scope, Verdict
 from webapp.headers import rate_limit_headers
-from webapp.identity import InvalidIdentity, client_ip, limit_subject, user_from_headers
+from webapp.identity import (
+    InvalidIdentity,
+    client_ip,
+    is_allowlisted,
+    limit_subject,
+    user_from_headers,
+)
 from webapp.settings import Backend, Settings
 from webapp.simulate import Scenario, simulate
 
@@ -98,6 +104,7 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         peer = request.client.host if request.client else None
         ip = client_ip(peer, request.headers, settings.trusted_ip_header)
+        request.state.allowlisted = is_allowlisted(ip, settings.ip_allowlist)
         return Identity(ip=limit_subject(ip), user=user)
 
     # A plain (sync) dependency: FastAPI runs it in a worker thread, so a slow
@@ -106,8 +113,12 @@ def create_app(
         """A dependency that spends ``weight`` requests' worth of every limit."""
 
         def rate_limit(
-            identity: Annotated[Identity, Depends(identify)], response: Response
+            identity: Annotated[Identity, Depends(identify)],
+            request: Request,
+            response: Response,
         ) -> Verdict:
+            if request.state.allowlisted:
+                return Verdict(True, ())  # no limits, no headers
             started = time.perf_counter()
             try:
                 verdict = service.check(identity, weight)

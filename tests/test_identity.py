@@ -1,6 +1,14 @@
+import ipaddress
+
 import pytest
 
-from webapp.identity import InvalidIdentity, client_ip, limit_subject, user_from_headers
+from webapp.identity import (
+    InvalidIdentity,
+    client_ip,
+    is_allowlisted,
+    limit_subject,
+    user_from_headers,
+)
 
 
 @pytest.mark.parametrize(
@@ -62,3 +70,13 @@ def test_ipv6_and_unknown_peer() -> None:
 )
 def test_limit_subject(ip: str, subject: str) -> None:
     assert limit_subject(ip) == subject
+
+
+def test_is_allowlisted() -> None:
+    allow = (ipaddress.ip_network("10.0.0.0/8"), ipaddress.ip_network("2001:db8::/32"))
+    assert is_allowlisted("10.200.0.1", allow)
+    assert is_allowlisted("::ffff:10.0.0.1", allow)
+    assert is_allowlisted("2001:db8:ffff::1", allow)
+    assert not is_allowlisted("11.0.0.1", allow)
+    assert not is_allowlisted("unknown", allow)
+    assert not is_allowlisted("10.0.0.1", ())

@@ -1,3 +1,5 @@
+import ipaddress
+
 import pytest
 
 from ratelimit.limits import Algorithm, LimitSpec
@@ -84,3 +86,14 @@ def test_redis_backend_needs_a_url_and_a_redis_algorithm() -> None:
         Settings(backend=Backend.REDIS)
     with pytest.raises(ValueError):
         Settings.from_env({"REDIS_URL": "redis://x:1/0", "RATE_LIMIT_ALGORITHM": "counter"})
+
+
+def test_ip_allowlist() -> None:
+    s = Settings.from_env({"IP_ALLOWLIST": "10.0.0.0/8, 192.0.2.7 ,2001:db8::/32,"})
+    assert s.ip_allowlist == (
+        ipaddress.ip_network("10.0.0.0/8"),
+        ipaddress.ip_network("192.0.2.7/32"),
+        ipaddress.ip_network("2001:db8::/32"),
+    )
+    with pytest.raises(ConfigError, match=r"IP_ALLOWLIST='10\.0\.0\.1/8': expected IPs or CIDR"):
+        Settings.from_env({"IP_ALLOWLIST": "10.0.0.1/8"})  # host bits set: likely a typo

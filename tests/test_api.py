@@ -1,3 +1,5 @@
+import ipaddress
+
 from fastapi.testclient import TestClient
 
 from ratelimit.limits import LimitSpec
@@ -78,3 +80,19 @@ def test_expensive_endpoint_spends_five_at_once() -> None:
     blocked = c.get("/api/report", headers=headers)
     assert blocked.status_code == 429  # 5 don't fit in 2...
     assert get(c) == 200  # ...but a normal request still does
+
+
+def test_allowlisted_ips_skip_every_limit() -> None:
+    settings = Settings(
+        ip_limit=LimitSpec(1, 60),
+        user_limit=LimitSpec(1, 60),
+        trusted_ip_header="x-real-ip",
+        ip_allowlist=(ipaddress.ip_network("10.0.0.0/8"),),
+    )
+    c = TestClient(create_app(settings))
+    inside = {"x-real-ip": "10.1.2.3", "x-user-id": "monitor"}
+    responses = [c.get("/api/hello", headers=inside) for _ in range(5)]
+    assert all(r.status_code == 200 for r in responses)
+    assert "RateLimit-Limit" not in responses[0].headers
+    outside = {"x-real-ip": "11.1.2.3"}
+    assert [c.get("/api/hello", headers=outside).status_code for _ in range(2)] == [200, 429]

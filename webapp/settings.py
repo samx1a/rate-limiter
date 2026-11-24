@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -47,6 +48,9 @@ class Settings:
     ip_limit: LimitSpec = DEFAULT_IP_LIMIT
     user_limit: LimitSpec = DEFAULT_USER_LIMIT
     trusted_ip_header: str | None = None
+    # Clients that skip rate limiting entirely, e.g. your own monitoring or an
+    # internal service. Matched against the resolved client IP.
+    ip_allowlist: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = ()
     # While Redis is down: limit per server from memory (local_fallback), else let
     # everything through (fail_open) or refuse with 503.
     local_fallback: bool = True
@@ -92,6 +96,7 @@ class Settings:
                 ip_limit=read("IP_LIMIT", parse_limit, defaults.ip_limit),
                 user_limit=read("USER_LIMIT", parse_limit, defaults.user_limit),
                 trusted_ip_header=env.get("TRUSTED_IP_HEADER") or None,
+                ip_allowlist=read("IP_ALLOWLIST", _networks, defaults.ip_allowlist),
                 local_fallback=read("LOCAL_FALLBACK", _flag, defaults.local_fallback),
                 fail_open=read("FAIL_OPEN", _flag, defaults.fail_open),
             )
@@ -110,6 +115,15 @@ def _choice(enum: type[E]) -> Callable[[str], E]:
             raise ValueError(f"expected one of: {options}") from None
 
     return parse
+
+
+def _networks(value: str) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+    """Comma-separated IPs or CIDR ranges: ``10.0.0.0/8, 2001:db8::/32, 192.0.2.7``."""
+    parts = [part.strip() for part in value.split(",") if part.strip()]
+    try:
+        return tuple(ipaddress.ip_network(part) for part in parts)
+    except ValueError as exc:
+        raise ValueError(f"expected IPs or CIDR ranges ({exc})") from None
 
 
 def _millis(value: str) -> float:

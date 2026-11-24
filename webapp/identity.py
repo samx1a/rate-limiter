@@ -81,3 +81,17 @@ def limit_subject(ip: str, ipv6_prefix: int = IPV6_PREFIX) -> str:
             return str(address.ipv4_mapped)
         return str(ipaddress.IPv6Network((address, ipv6_prefix), strict=False))
     return str(address)
+
+
+def is_allowlisted(
+    ip: str, allowlist: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]
+) -> bool:
+    if not allowlist:
+        return False
+    try:
+        address = ipaddress.ip_address(ip)
+    except ValueError:
+        return False  # "unknown" is never trusted
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped
+    return any(address in network for network in allowlist)

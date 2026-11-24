@@ -198,6 +198,7 @@ REDIS_URL=redis://127.0.0.1:6399/0 uv run pytest
 | `IP_LIMIT` | `60/1m` | per-IP limit, written like `10/s`, `100/1m`, `5/30s` |
 | `USER_LIMIT` | `10/10s` | per-user limit |
 | `TRUSTED_IP_HEADER` | none | proxy header to read the client IP from (`x-real-ip` on Vercel) |
+| `IP_ALLOWLIST` | none | IPs or CIDR ranges that skip limiting, e.g. `10.0.0.0/8, 192.0.2.7` |
 | `LOCAL_FALLBACK` | `true` | when Redis is unreachable, limit per server from memory |
 | `FAIL_OPEN` | `true` | with no local fallback, allow requests when Redis is unreachable |
 | `REDIS_TIMEOUT_MS` | `250` | per-command Redis timeout |
