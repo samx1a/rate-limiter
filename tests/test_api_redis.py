@@ -68,3 +68,27 @@ def test_shutdown_closes_the_redis_client(
         connections = list(pool._available_connections)  # type: ignore[attr-defined]
         assert connections and all(conn._sock is not None for conn in connections)
     assert all(conn._sock is None for conn in connections)  # sockets closed on shutdown
+
+
+@pytest.mark.parametrize("batch", [True, False])
+def test_a_user_429_spends_ip_quota_only_without_batching(
+    redis_client: redis.Redis, prefix: str, batch: bool
+) -> None:
+    settings = Settings(
+        backend=Backend.REDIS,
+        redis_url=REDIS_URL,
+        key_prefix=prefix,
+        ip_limit=LimitSpec(10, 60),
+        user_limit=LimitSpec(1, 60),
+        trusted_ip_header="x-real-ip",
+        redis_timeout=5.0,
+        redis_batch=batch,
+    )
+    c = TestClient(create_app(settings))
+    alice = {"x-real-ip": "203.0.113.9", "x-user-id": "alice"}
+    assert c.get("/api/hello", headers=alice).status_code == 200
+    for _ in range(3):
+        assert c.get("/api/hello", headers=alice).status_code == 429  # user limit
+    remaining = c.get("/api/hello", headers={"x-real-ip": "203.0.113.9"}).headers
+    # IP spent: 1 (allowed) + 1 now, plus 3 for the 429s when checked one by one.
+    assert remaining["RateLimit-Remaining"] == ("8" if batch else "5")

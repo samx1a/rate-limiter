@@ -100,6 +100,14 @@ Some details:
   processes (own memory, own connection) that all hammer one key. Together they get
   exactly the limit through. I ran it against the cloud Redis too, not just locally.
 
+**One round trip for both limits.** At first the IP check and the user check were two
+separate scripts, so two round trips to Redis, and a request blocked by the user limit
+had already spent from the IP limit. Now each algorithm's Lua is split into a
+`decide()` that only reads and a `commit()` that writes, and one script checks both
+keys and only commits if both have room. The catch is Redis Cluster: a script can only
+touch keys on one node, and an IP's key and a user's key usually won't be, so
+`REDIS_BATCH=false` goes back to one script per limit.
+
 **If Redis goes down:** each server switches to limiting from its own memory until
 Redis is back. That isn't perfect, since with 4 servers a client could get up to 4x the
 limit, but it's a lot better than no limit at all. If you turn that off
@@ -207,6 +215,7 @@ REDIS_URL=redis://127.0.0.1:6399/0 uv run pytest
 | `LOCAL_FALLBACK` | `true` | when Redis is unreachable, limit per server from memory |
 | `FAIL_OPEN` | `true` | with no local fallback, allow requests when Redis is unreachable |
 | `REDIS_TIMEOUT_MS` | `250` | per-command Redis timeout |
+| `REDIS_BATCH` | `true` | check both limits in one script (turn off on Redis Cluster) |
 | `RATE_LIMIT_PREFIX` | `rl` | prefix for Redis keys |
 
 ## What I'd change at a bigger scale
@@ -217,9 +226,6 @@ REDIS_URL=redis://127.0.0.1:6399/0 uv run pytest
   key, and it estimates the last N seconds by weighting the previous window by how much
   of it is still in view. It can be a bit off when traffic is bunched up, but memory
   stays flat no matter how big the limit is.
-- **Two Redis calls per request.** The IP and user checks are separate scripts. One
-  script that checks both keys would save a round trip and make the pair all or
-  nothing. On Redis Cluster both keys would need the same hash slot for that.
 - **Hot keys.** One very busy key always lands on one Redis shard. Past that point you'd
   want a small local allowance per server that syncs with Redis now and then, which
   trades a bit of accuracy for far fewer calls.

@@ -20,8 +20,8 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from ratelimit.breaker import CircuitBreaker
 from ratelimit.decision import LimiterUnavailable, RateLimiter
 from ratelimit.limits import LimitSpec, build_limiter
-from ratelimit.redis_limiters import build_redis_limiter, connect
-from ratelimit.service import Identity, Policy, RateLimitService, Scope, Verdict
+from ratelimit.redis_limiters import build_redis_limiter, connect, hit_many
+from ratelimit.service import BatchHit, Identity, Policy, RateLimitService, Scope, Verdict
 from webapp.headers import rate_limit_headers
 from webapp.identity import (
     InvalidIdentity,
@@ -129,6 +129,10 @@ def build_service(settings: Settings, client: redis.Redis | None = None) -> Rate
         def fallback(spec: LimitSpec) -> RateLimiter | None:
             return None  # memory can't be "down"
 
+    batch: BatchHit | None = None
+    if settings.backend is Backend.REDIS and settings.redis_batch:
+        batch = hit_many  # IP + user limit in one round trip, all or nothing
+
     def policy(name: str, scope: Scope, spec: LimitSpec) -> Policy:
         return Policy(name, scope, make(spec), period=spec.period, fallback=fallback(spec))
 
@@ -138,6 +142,7 @@ def build_service(settings: Settings, client: redis.Redis | None = None) -> Rate
             policy("user", Scope.USER, settings.user_limit),
         ],
         fail_open=settings.fail_open,
+        batch=batch,
     )
 
 

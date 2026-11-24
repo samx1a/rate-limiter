@@ -41,6 +41,9 @@ class Settings:
     backend: Backend = Backend.MEMORY
     redis_url: str | None = None
     key_prefix: str = "rl"
+    # Check the IP and user limits in one Redis round trip, all or nothing. Turn off on
+    # Redis Cluster, where the two keys usually live on different nodes.
+    redis_batch: bool = True
     # Per-command Redis timeout. Keep it short in production (same region as Redis);
     # raise it when Redis is far away, e.g. running tests against a cloud database.
     redis_timeout: float = 0.25
@@ -92,6 +95,7 @@ class Settings:
                 redis_url=redis_url,
                 key_prefix=read("RATE_LIMIT_PREFIX", str, defaults.key_prefix),
                 redis_timeout=read("REDIS_TIMEOUT_MS", _millis, defaults.redis_timeout),
+                redis_batch=read("REDIS_BATCH", _flag, defaults.redis_batch),
                 algorithm=read("RATE_LIMIT_ALGORITHM", _choice(Algorithm), defaults.algorithm),
                 ip_limit=read("IP_LIMIT", parse_limit, defaults.ip_limit),
                 user_limit=read("USER_LIMIT", parse_limit, defaults.user_limit),

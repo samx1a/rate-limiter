@@ -8,8 +8,9 @@ Rules:
 - Policies are checked IP first, then user. IP limits are the cheapest defence against
   floods and work for anonymous traffic.
 - Checking stops at the first block. A blocked IP therefore never spends a user's
-  quota. (Policies checked *before* the block have spent theirs; that is the usual
-  trade-off of sequential checks and keeps every check a single atomic step.)
+  quota. With a ``batch`` function (Redis: ``hit_many``) all policies are checked in
+  one atomic step and nothing is spent unless all of them allow. Without one, policies
+  checked *before* the block have spent theirs.
 - If a limiter's store is unreachable and the policy has a ``fallback`` (an in-memory
   limiter), the fallback decides instead. Each server then limits on its own, so with
   N servers a client can get up to N times the limit, but that beats no limit at all.
@@ -21,7 +22,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -39,6 +40,11 @@ __all__ = [
     "Scope",
     "Verdict",
 ]
+
+
+# Checks several (limiter, key, cost) at once, all or nothing, stopping at the first
+# block. See ratelimit.redis_limiters.hit_many.
+BatchHit = Callable[[Sequence[tuple[RateLimiter, str, int]]], list[Decision]]
 
 
 class Scope(StrEnum):
@@ -87,7 +93,12 @@ class Verdict:
 
 class RateLimitService:
     def __init__(
-        self, policies: Sequence[Policy], *, fail_open: bool = True, metrics: Metrics | None = None
+        self,
+        policies: Sequence[Policy],
+        *,
+        fail_open: bool = True,
+        metrics: Metrics | None = None,
+        batch: BatchHit | None = None,
     ) -> None:
         names = [p.name for p in policies]
         if len(names) != len(set(names)):
@@ -96,6 +107,7 @@ class RateLimitService:
         self._policies = tuple(sorted(policies, key=lambda p: order[p.scope]))
         self._fail_open = fail_open
         self.metrics = metrics or Metrics()
+        self._batch = batch
         # Policies whose store is currently unreachable. Used to log an outage once
         # when it starts and once when it ends, not on every request in between.
         self._down: set[str] = set()
@@ -118,14 +130,23 @@ class RateLimitService:
         """
         if weight < 1:
             raise ValueError("weight must be >= 1")
-        results: list[PolicyResult] = []
-        degraded = False
+        checks: list[tuple[Policy, str, int]] = []
         for policy in self._policies:
             subject = identity.ip if policy.scope is Scope.IP else identity.user
             if subject is None:
                 continue  # anonymous request: user limits do not apply
-            key = self.key(policy, subject)
-            cost = policy.cost * weight
+            checks.append((policy, self.key(policy, subject), policy.cost * weight))
+
+        if self._batch is not None and len(checks) > 1:
+            try:
+                decisions = self._batch([(p.limiter, key, cost) for p, key, cost in checks])
+            except LimiterUnavailable:
+                pass  # check one by one below, which knows each policy's fallback
+            else:
+                return self._verdict(checks, decisions)
+        results: list[PolicyResult] = []
+        degraded = False
+        for policy, key, cost in checks:
             try:
                 decision = policy.limiter.hit(key, cost)
             except LimiterUnavailable as exc:
@@ -170,3 +191,13 @@ class RateLimitService:
                 return
             self._down.discard(policy.name)
         log.warning("rate limit store for %r is back", policy.name)
+
+    def _verdict(self, checks: list[tuple[Policy, str, int]], decisions: list[Decision]) -> Verdict:
+        results = []
+        for (policy, _, _), decision in zip(checks, decisions, strict=False):
+            self._mark_up(policy)
+            result = "allowed" if decision.allowed else "blocked"
+            self.metrics.inc("ratelimit_decisions_total", policy=policy.name, result=result)
+            results.append(PolicyResult(policy, decision))
+        allowed = len(results) == len(checks) and all(r.decision.allowed for r in results)
+        return Verdict(allowed, tuple(results))
