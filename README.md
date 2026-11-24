@@ -21,8 +21,9 @@ ratelimit/
     counter.py         counts per key forever. just the baseline
     fixed_window.py    resets every N seconds. cheap, but leaks bursts at the edges
     sliding_window.py  looks back exactly N seconds from now
+    sliding_counter.py same idea with two numbers per key instead of a log
     token_bucket.py    bursts up to a capacity, then refills at a steady rate
-  lua/               the same three time-based algorithms as Redis Lua scripts
+  lua/               the same four time-based algorithms as Redis Lua scripts
   redis_limiters.py  Python side of the Redis version
   service.py         applies a per-IP limit and a per-user limit to each request
 webapp/              FastAPI app, 429s + headers, the demo page
@@ -162,7 +163,7 @@ REDIS_URL=redis://127.0.0.1:6399/0 uv run pytest
 |---------|---------|--------------|
 | `RATE_LIMIT_BACKEND` | `redis` if `REDIS_URL` is set, else `memory` | where the counts live |
 | `REDIS_URL` | none | Redis connection string (`rediss://` for TLS) |
-| `RATE_LIMIT_ALGORITHM` | `token_bucket` | `fixed_window`, `sliding_window` or `token_bucket` |
+| `RATE_LIMIT_ALGORITHM` | `token_bucket` | `fixed_window`, `sliding_window`, `sliding_counter` or `token_bucket` |
 | `IP_LIMIT` | `60/1m` | per-IP limit, written like `10/s`, `100/1m`, `5/30s` |
 | `USER_LIMIT` | `10/10s` | per-user limit |
 | `TRUSTED_IP_HEADER` | none | proxy header to read the client IP from (`x-real-ip` on Vercel) |
@@ -173,8 +174,11 @@ REDIS_URL=redis://127.0.0.1:6399/0 uv run pytest
 ## What I'd change at a bigger scale
 
 - **Sliding window memory.** The sliding log stores one entry per allowed request, so a
-  limit like 100,000 per hour means up to 100,000 entries per user. At that size I'd
-  switch to the sliding window *counter*, which keeps two numbers and estimates.
+  limit like 100,000 per hour means up to 100,000 entries per user. That's why I added
+  the sliding window counter (`RATE_LIMIT_ALGORITHM=sliding_counter`): two numbers per
+  key, and it estimates the last N seconds by weighting the previous window by how much
+  of it is still in view. It can be a bit off when traffic is bunched up, but memory
+  stays flat no matter how big the limit is.
 - **Two Redis calls per request.** The IP and user checks are separate scripts. One
   script that checks both keys would save a round trip and make the pair all or
   nothing. On Redis Cluster both keys would need the same hash slot for that.

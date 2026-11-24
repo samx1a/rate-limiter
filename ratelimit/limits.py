@@ -13,6 +13,7 @@ from enum import StrEnum
 
 from ratelimit.algorithms.counter import NaiveCounter
 from ratelimit.algorithms.fixed_window import FixedWindow
+from ratelimit.algorithms.sliding_counter import SlidingWindowCounter
 from ratelimit.algorithms.sliding_window import SlidingWindowLog
 from ratelimit.algorithms.token_bucket import TokenBucket
 from ratelimit.clock import Clock
@@ -26,6 +27,7 @@ class Algorithm(StrEnum):
     COUNTER = "counter"
     FIXED_WINDOW = "fixed_window"
     SLIDING_WINDOW = "sliding_window"
+    SLIDING_COUNTER = "sliding_counter"
     TOKEN_BUCKET = "token_bucket"
 
 
@@ -74,5 +76,7 @@ def build_limiter(
             return FixedWindow(spec.requests, spec.period, clock)
         case Algorithm.SLIDING_WINDOW:
             return SlidingWindowLog(spec.requests, spec.period, clock)
+        case Algorithm.SLIDING_COUNTER:
+            return SlidingWindowCounter(spec.requests, spec.period, clock)
         case Algorithm.TOKEN_BUCKET:
             return TokenBucket(spec.requests, spec.rate, clock)

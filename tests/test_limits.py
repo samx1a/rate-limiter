@@ -3,6 +3,7 @@ import pytest
 from ratelimit import FakeClock
 from ratelimit.algorithms.counter import NaiveCounter
 from ratelimit.algorithms.fixed_window import FixedWindow
+from ratelimit.algorithms.sliding_counter import SlidingWindowCounter
 from ratelimit.algorithms.sliding_window import SlidingWindowLog
 from ratelimit.algorithms.token_bucket import TokenBucket
 from ratelimit.limits import Algorithm, LimitSpec, build_limiter, parse_limit
@@ -42,6 +43,7 @@ def test_spec_rate_and_str() -> None:
         ("counter", NaiveCounter),
         ("fixed_window", FixedWindow),
         ("sliding_window", SlidingWindowLog),
+        ("sliding_counter", SlidingWindowCounter),
         (Algorithm.TOKEN_BUCKET, TokenBucket),
     ],
 )

@@ -28,7 +28,7 @@ class Subject:
 Factory = Callable[[str], Subject]
 
 
-@pytest.fixture(params=["fixed_window", "sliding_window", "token_bucket"])
+@pytest.fixture(params=["fixed_window", "sliding_window", "sliding_counter", "token_bucket"])
 def algorithm(request: pytest.FixtureRequest) -> str:
     return str(request.param)
 
@@ -60,8 +60,10 @@ def test_blocked_decisions_are_well_formed(make: Subject) -> None:
         make.limiter.hit("k")
     blocked = make.limiter.hit("k")
     assert not blocked.allowed
-    assert 0 < blocked.retry_after <= PERIOD
-    assert 0 < blocked.reset_after <= PERIOD
+    # Most algorithms recover within one period. The sliding counter can take up to two:
+    # this window's count stays (weighted) in view through the whole next window.
+    assert 0 < blocked.retry_after <= 2 * PERIOD
+    assert 0 < blocked.reset_after <= 2 * PERIOD
 
 
 def test_blocked_requests_do_not_consume(make: Subject) -> None:
@@ -70,7 +72,16 @@ def test_blocked_requests_do_not_consume(make: Subject) -> None:
     assert make.limiter.hit("k", cost=1).allowed
 
 
-def test_full_limit_is_back_after_one_period(make: Subject) -> None:
+def test_full_limit_is_back_after_reset_after(make: Subject) -> None:
+    """reset_after is a promise: wait that long and the whole limit is available."""
+    last = [make.limiter.hit("k") for _ in range(LIMIT)][-1]
+    make.clock.advance(last.reset_after)
+    assert [make.limiter.hit("k").allowed for _ in range(LIMIT)] == [True] * LIMIT
+
+
+def test_full_limit_is_back_after_one_period(make: Subject, algorithm: str) -> None:
+    if algorithm == "sliding_counter":
+        pytest.skip("estimates: a burst at a window start still counts one period later")
     for _ in range(LIMIT):
         make.limiter.hit("k")
     make.clock.advance(PERIOD)

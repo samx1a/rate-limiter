@@ -189,6 +189,10 @@ def build_redis_limiter(
             return RedisSlidingWindow(
                 client, spec.requests, spec.period, prefix=prefix, now_ms=now_ms
             )
+        case Algorithm.SLIDING_COUNTER:
+            return RedisSlidingCounter(
+                client, spec.requests, spec.period, prefix=prefix, now_ms=now_ms
+            )
         case Algorithm.TOKEN_BUCKET:
             return RedisTokenBucket(client, spec.requests, spec.rate, prefix=prefix, now_ms=now_ms)
         case Algorithm.COUNTER:
