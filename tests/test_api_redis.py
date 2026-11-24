@@ -34,3 +34,28 @@ def test_two_app_instances_share_limits_through_redis(
     ]
     assert codes == [200, 200, 200, 429]  # 200s here are real decisions, not fail-open
     assert server_a.get("/api/info").json()["backend"] == "redis"
+
+
+def test_shutdown_closes_the_redis_client(
+    redis_client: redis.Redis, prefix: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import webapp.main
+
+    created: list[redis.Redis] = []
+    real_connect = webapp.main.connect
+
+    def tracking_connect(*args: object, **kwargs: object) -> redis.Redis:
+        client = real_connect(*args, **kwargs)  # type: ignore[arg-type]
+        created.append(client)
+        return client
+
+    monkeypatch.setattr(webapp.main, "connect", tracking_connect)
+    settings = Settings(
+        backend=Backend.REDIS, redis_url=REDIS_URL, key_prefix=prefix, redis_timeout=5.0
+    )
+    with TestClient(create_app(settings)) as c:
+        c.get("/api/hello")
+        pool = created[0].connection_pool
+        connections = list(pool._available_connections)  # type: ignore[attr-defined]
+        assert connections and all(conn._sock is not None for conn in connections)
+    assert all(conn._sock is None for conn in connections)  # sockets closed on shutdown

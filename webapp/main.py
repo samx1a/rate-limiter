@@ -5,9 +5,12 @@ runtime, and string annotations cannot see aliases defined inside ``create_app``
 """
 
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
 
+import redis
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 
@@ -24,13 +27,20 @@ from webapp.simulate import Scenario, simulate
 DEMO_PAGE = (Path(__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
 
 
-def build_service(settings: Settings) -> RateLimitService:
+def redis_client(settings: Settings) -> redis.Redis | None:
+    if settings.backend is not Backend.REDIS:
+        return None
+    assert settings.redis_url  # checked in Settings
+    return connect(settings.redis_url, timeout=settings.redis_timeout)
+
+
+def build_service(settings: Settings, client: redis.Redis | None = None) -> RateLimitService:
     def local(spec: LimitSpec) -> RateLimiter:
         return build_limiter(settings.algorithm, spec)
 
     if settings.backend is Backend.REDIS:
-        assert settings.redis_url  # checked in Settings
-        client = connect(settings.redis_url, timeout=settings.redis_timeout)
+        client = client or redis_client(settings)
+        assert client is not None
         # One breaker for the one Redis: if it's down for the IP check, it's down for
         # the user check too.
         breaker = CircuitBreaker()
@@ -65,8 +75,18 @@ def create_app(
     settings: Settings | None = None, service: RateLimitService | None = None
 ) -> FastAPI:
     settings = settings or Settings.from_env()
-    service = service or build_service(settings)
-    app = FastAPI(title="rate-limiter", version="0.1.0")
+    client = None
+    if service is None:
+        client = redis_client(settings)
+        service = build_service(settings, client)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        yield
+        if client is not None:
+            client.close()  # give the pooled connections back on shutdown
+
+    app = FastAPI(title="rate-limiter", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.service = service
 
