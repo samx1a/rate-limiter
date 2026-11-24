@@ -96,3 +96,24 @@ def test_allowlisted_ips_skip_every_limit() -> None:
     assert "RateLimit-Limit" not in responses[0].headers
     outside = {"x-real-ip": "11.1.2.3"}
     assert [c.get("/api/hello", headers=outside).status_code for _ in range(2)] == [200, 429]
+
+
+def test_openapi_documents_the_429() -> None:
+    schema = client().get("/openapi.json").json()
+    for path in ("/api/hello", "/api/report"):
+        responses = schema["paths"][path]["get"]["responses"]
+        assert {"200", "429", "503"} <= set(responses)
+        assert "Retry-After" in responses["429"]["headers"]
+        example = responses["429"]["content"]["application/json"]["example"]
+        assert example["detail"]["error"] == "rate_limited"
+
+
+def test_documented_429_matches_a_real_one() -> None:
+    c = client(user_limit=1)
+    get(c)
+    real = c.get("/api/hello", headers={"x-real-ip": "203.0.113.1", "x-user-id": "alice"})
+    documented = c.get("/openapi.json").json()["paths"]["/api/hello"]["get"]["responses"]["429"]
+    example = documented["content"]["application/json"]["example"]
+    assert real.json().keys() == example.keys()
+    assert real.json()["detail"].keys() == example["detail"].keys()
+    assert all(name in real.headers for name in documented["headers"])  # case-insensitive

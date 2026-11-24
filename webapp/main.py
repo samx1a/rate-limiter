@@ -31,6 +31,40 @@ from webapp.settings import Backend, Settings
 from webapp.simulate import Scenario, simulate
 
 EXPENSIVE_WEIGHT = 5
+
+
+def _header(description: str) -> dict[str, Any]:
+    return {"description": description, "schema": {"type": "integer"}}
+
+
+_LIMIT_HEADERS = {
+    "RateLimit-Limit": _header("Requests allowed by the limit you're closest to hitting"),
+    "RateLimit-Remaining": _header("Requests left right now"),
+    "RateLimit-Reset": _header("Seconds until the full limit is back"),
+}
+# Shown in /docs so API users can see the 429 and 503 shapes without triggering them.
+LIMITED_RESPONSES: dict[int | str, dict[str, Any]] = {
+    429: {
+        "description": "Rate limited. Wait Retry-After seconds before trying again.",
+        "headers": {**_LIMIT_HEADERS, "Retry-After": _header("Seconds to wait")},
+        "content": {
+            "application/json": {
+                "example": {
+                    "detail": {
+                        "error": "rate_limited",
+                        "message": "Too many requests. Slow down and retry later.",
+                        "policy": "user",
+                        "retry_after": 1,
+                    }
+                }
+            }
+        },
+    },
+    503: {
+        "description": "The limit store is down and FAIL_OPEN=false (no local fallback).",
+        "headers": {"Retry-After": _header("Seconds to wait")},
+    },
+}
 DEMO_PAGE = (Path(__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
 
 
@@ -191,11 +225,11 @@ def create_app(
             "fail_open": settings.fail_open,
         }
 
-    @app.get("/api/hello")
+    @app.get("/api/hello", responses=LIMITED_RESPONSES)
     def hello(verdict: Limited, identity: Annotated[Identity, Depends(identify)]) -> dict[str, Any]:
         return {"message": "hello", "ip": identity.ip, "user": identity.user}
 
-    @app.get("/api/report")
+    @app.get("/api/report", responses=LIMITED_RESPONSES)
     def report(verdict: Expensive) -> dict[str, Any]:
         """Stands in for a slow, expensive endpoint: each call counts as 5 requests."""
         return {"message": "report ready", "cost": EXPENSIVE_WEIGHT}
