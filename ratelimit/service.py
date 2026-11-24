@@ -106,7 +106,14 @@ class RateLimitService:
         # The subject goes last, so a ':' inside it (IPv6) cannot cause a collision.
         return f"{policy.name}:{policy.scope}:{subject}"
 
-    def check(self, identity: Identity) -> Verdict:
+    def check(self, identity: Identity, weight: int = 1) -> Verdict:
+        """Check every policy that applies to ``identity``.
+
+        ``weight`` scales each policy's cost, so an expensive endpoint can count as
+        several requests (``weight=5`` spends 5 tokens where a normal call spends 1).
+        """
+        if weight < 1:
+            raise ValueError("weight must be >= 1")
         results: list[PolicyResult] = []
         degraded = False
         for policy in self._policies:
@@ -114,12 +121,13 @@ class RateLimitService:
             if subject is None:
                 continue  # anonymous request: user limits do not apply
             key = self.key(policy, subject)
+            cost = policy.cost * weight
             try:
-                decision = policy.limiter.hit(key, policy.cost)
+                decision = policy.limiter.hit(key, cost)
             except LimiterUnavailable as exc:
                 self._mark_down(policy, exc)
                 if policy.fallback is not None:
-                    decision = policy.fallback.hit(key, policy.cost)
+                    decision = policy.fallback.hit(key, cost)
                     degraded = True
                 elif not self._fail_open:
                     raise

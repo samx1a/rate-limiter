@@ -184,3 +184,12 @@ def test_an_outage_is_logged_once_when_it_starts_and_once_when_it_ends(
     assert len(messages) == 2
     assert "unavailable (store down); failing open" in messages[0]
     assert "is back" in messages[1]
+
+
+def test_weight_scales_every_policy_cost() -> None:
+    svc, _, _ = service(ip_limit=10, user_limit=6)
+    verdict = svc.check(Identity(ip="1.2.3.4", user="alice"), weight=4)
+    assert [r.decision.remaining for r in verdict.results] == [6, 2]
+    assert not svc.check(Identity(ip="1.2.3.4", user="alice"), weight=4).allowed
+    with pytest.raises(ValueError):
+        svc.check(Identity(ip="1.2.3.4"), weight=0)

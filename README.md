@@ -122,6 +122,10 @@ server restarted.
 seconds, token bucket). The user comes from an `X-User-Id` header. In a real app that
 would come from a login token, but a header keeps the demo simple.
 
+`GET /api/report` stands in for an expensive endpoint: each call counts as 5 requests
+against both limits. Not every request costs the server the same, so the limiter
+shouldn't treat them the same either.
+
 Here's a real response from the live site after using up a user's limit:
 
 ```

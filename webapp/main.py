@@ -5,7 +5,7 @@ runtime, and string annotations cannot see aliases defined inside ``create_app``
 """
 
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
@@ -24,6 +24,7 @@ from webapp.identity import InvalidIdentity, client_ip, limit_subject, user_from
 from webapp.settings import Backend, Settings
 from webapp.simulate import Scenario, simulate
 
+EXPENSIVE_WEIGHT = 5
 DEMO_PAGE = (Path(__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
 
 
@@ -101,37 +102,45 @@ def create_app(
 
     # A plain (sync) dependency: FastAPI runs it in a worker thread, so a slow
     # limiter store never blocks the event loop.
-    def rate_limit(identity: Annotated[Identity, Depends(identify)], response: Response) -> Verdict:
-        started = time.perf_counter()
-        try:
-            verdict = service.check(identity)
-        except LimiterUnavailable as exc:  # only reached when FAIL_OPEN=false
-            raise HTTPException(
-                status_code=503,
-                detail={"error": "limiter_unavailable", "message": "Try again shortly."},
-                headers={"Retry-After": "1"},
-            ) from exc
-        headers = rate_limit_headers(verdict, service.policies)
-        # How long the limit check took, visible in browser dev tools. This is how the
-        # Redis round trip was measured in production (see docs/LOAD_TEST.md).
-        elapsed_ms = (time.perf_counter() - started) * 1000
-        headers["Server-Timing"] = f"ratelimit;dur={elapsed_ms:.2f}"
-        if not verdict.allowed:
-            binding = verdict.binding
-            raise HTTPException(
-                status_code=429,
-                detail={
-                    "error": "rate_limited",
-                    "message": "Too many requests. Slow down and retry later.",
-                    "policy": binding.policy.name if binding else None,
-                    "retry_after": int(headers.get("Retry-After", "0")) or None,
-                },
-                headers=headers,
-            )
-        response.headers.update(headers)
-        return verdict
+    def rate_limited(weight: int = 1) -> Callable[..., Verdict]:
+        """A dependency that spends ``weight`` requests' worth of every limit."""
 
-    Limited = Annotated[Verdict, Depends(rate_limit)]
+        def rate_limit(
+            identity: Annotated[Identity, Depends(identify)], response: Response
+        ) -> Verdict:
+            started = time.perf_counter()
+            try:
+                verdict = service.check(identity, weight)
+            except LimiterUnavailable as exc:  # only reached when FAIL_OPEN=false
+                raise HTTPException(
+                    status_code=503,
+                    detail={"error": "limiter_unavailable", "message": "Try again shortly."},
+                    headers={"Retry-After": "1"},
+                ) from exc
+            headers = rate_limit_headers(verdict, service.policies)
+            # How long the limit check took, visible in browser dev tools. This is how the
+            # Redis round trip was measured in production (see docs/LOAD_TEST.md).
+            elapsed_ms = (time.perf_counter() - started) * 1000
+            headers["Server-Timing"] = f"ratelimit;dur={elapsed_ms:.2f}"
+            if not verdict.allowed:
+                binding = verdict.binding
+                raise HTTPException(
+                    status_code=429,
+                    detail={
+                        "error": "rate_limited",
+                        "message": "Too many requests. Slow down and retry later.",
+                        "policy": binding.policy.name if binding else None,
+                        "retry_after": int(headers.get("Retry-After", "0")) or None,
+                    },
+                    headers=headers,
+                )
+            response.headers.update(headers)
+            return verdict
+
+        return rate_limit
+
+    Limited = Annotated[Verdict, Depends(rate_limited())]
+    Expensive = Annotated[Verdict, Depends(rate_limited(EXPENSIVE_WEIGHT))]
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     def demo_page() -> HTMLResponse:
@@ -174,6 +183,11 @@ def create_app(
     @app.get("/api/hello")
     def hello(verdict: Limited, identity: Annotated[Identity, Depends(identify)]) -> dict[str, Any]:
         return {"message": "hello", "ip": identity.ip, "user": identity.user}
+
+    @app.get("/api/report")
+    def report(verdict: Expensive) -> dict[str, Any]:
+        """Stands in for a slow, expensive endpoint: each call counts as 5 requests."""
+        return {"message": "report ready", "cost": EXPENSIVE_WEIGHT}
 
     return app
 

@@ -67,3 +67,14 @@ def test_ipv6_clients_share_a_limit_per_64() -> None:
     codes = [get(c, user=None, ip=f"2001:db8:1:2::{n:x}") for n in range(1, 5)]
     assert codes == [200, 200, 200, 429]
     assert get(c, user=None, ip="2001:db8:1:3::1") == 200  # a different /64
+
+
+def test_expensive_endpoint_spends_five_at_once() -> None:
+    c = client(user_limit=12)
+    headers = {"x-real-ip": "203.0.113.1", "x-user-id": "alice"}
+    first = c.get("/api/report", headers=headers)
+    assert first.status_code == 200 and first.headers["RateLimit-Remaining"] == "7"
+    assert c.get("/api/report", headers=headers).status_code == 200  # 2 left
+    blocked = c.get("/api/report", headers=headers)
+    assert blocked.status_code == 429  # 5 don't fit in 2...
+    assert get(c) == 200  # ...but a normal request still does
