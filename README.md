@@ -104,6 +104,9 @@ Some details:
 and lets requests through without limiting. A rate limiter taking the whole site down
 seemed worse than briefly not limiting. Set `FAIL_OPEN=false` to return 503 instead.
 Redis commands time out after 250 ms, so an outage doesn't make every request hang.
+On top of that there's a circuit breaker: after 3 failures in a row it stops calling
+Redis and fails instantly, then every 5 seconds lets one request try Redis again to see
+if it's back. Without it, every request during an outage would still pay the 250 ms.
 
 ## Using the API
 

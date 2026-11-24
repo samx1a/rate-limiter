@@ -11,6 +11,7 @@ from typing import Annotated, Any
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 
+from ratelimit.breaker import CircuitBreaker
 from ratelimit.decision import LimiterUnavailable, RateLimiter
 from ratelimit.limits import LimitSpec, build_limiter
 from ratelimit.redis_limiters import build_redis_limiter, connect
@@ -27,9 +28,14 @@ def build_service(settings: Settings) -> RateLimitService:
     if settings.backend is Backend.REDIS:
         assert settings.redis_url  # checked in Settings
         client = connect(settings.redis_url, timeout=settings.redis_timeout)
+        # One breaker for the one Redis: if it's down for the IP check, it's down for
+        # the user check too.
+        breaker = CircuitBreaker()
 
         def make(spec: LimitSpec) -> RateLimiter:
-            return build_redis_limiter(settings.algorithm, spec, client, prefix=settings.key_prefix)
+            return build_redis_limiter(
+                settings.algorithm, spec, client, prefix=settings.key_prefix, breaker=breaker
+            )
 
     else:
 

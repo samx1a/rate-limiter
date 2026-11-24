@@ -14,14 +14,16 @@ import math
 import uuid
 from collections.abc import Callable, Sequence
 from importlib import resources
-from typing import Any
+from typing import Any, TypeVar
 
 import redis
 
+from ratelimit.breaker import CircuitBreaker
 from ratelimit.decision import Decision, LimiterUnavailable, RateLimiter, validate_cost
 from ratelimit.limits import Algorithm, LimitSpec
 
 NowMs = Callable[[], float]
+R = TypeVar("R")
 
 
 def load_script(client: redis.Redis, name: str) -> Any:
@@ -42,13 +44,20 @@ class _RedisLimiter:
     key_tag: str
 
     def __init__(
-        self, client: redis.Redis, limit: int, *, prefix: str, now_ms: NowMs | None
+        self,
+        client: redis.Redis,
+        limit: int,
+        *,
+        prefix: str,
+        now_ms: NowMs | None,
+        breaker: CircuitBreaker | None,
     ) -> None:
         if limit < 1:
             raise ValueError("limit must be >= 1")
         self._limit = limit
         self._prefix = prefix
         self._now_ms = now_ms
+        self._breaker = breaker
         self._client = client
         self._script = load_script(client, self.script_name)
 
@@ -60,23 +69,38 @@ class _RedisLimiter:
         return f"{self._prefix}:{self.key_tag}:{key}"
 
     def reset(self, key: str) -> None:
-        try:
-            self._client.delete(self.redis_key(key))
-        except (redis.ConnectionError, redis.TimeoutError) as exc:
-            raise LimiterUnavailable(str(exc)) from exc
+        self._call(lambda: self._client.delete(self.redis_key(key)))
 
     def _now_arg(self) -> str:
         return "" if self._now_ms is None else repr(float(self._now_ms()))
 
-    def _run(self, key: str, args: Sequence[Any]) -> Decision:
+    def _call(self, fn: Callable[[], R]) -> R:
+        """Call Redis through the breaker. Unreachable or too slow becomes
+        ``LimiterUnavailable``; the service decides whether to fail open or closed."""
+        breaker = self._breaker
+        if breaker is not None and not breaker.allow():
+            raise LimiterUnavailable("circuit open: not calling Redis for now")
         try:
-            allowed, remaining, retry_ms, reset_ms = self._script(
-                keys=[self.redis_key(key)], args=list(args)
-            )
+            result = fn()
         except (redis.ConnectionError, redis.TimeoutError) as exc:
-            # Unreachable or too slow: the service decides whether to fail open or
-            # closed. Other errors (e.g. a script bug) are real bugs and propagate.
+            if breaker is not None:
+                breaker.record_failure()
             raise LimiterUnavailable(str(exc)) from exc
+        except BaseException:
+            # Redis answered (e.g. a script error): it's up. These are real bugs and
+            # propagate, but the breaker must still hear back or a half-open trial
+            # would never finish.
+            if breaker is not None:
+                breaker.record_success()
+            raise
+        if breaker is not None:
+            breaker.record_success()
+        return result
+
+    def _run(self, key: str, args: Sequence[Any]) -> Decision:
+        allowed, remaining, retry_ms, reset_ms = self._call(
+            lambda: self._script(keys=[self.redis_key(key)], args=list(args))
+        )
         reset = _ms_to_s(reset_ms)
         if int(allowed):
             return Decision(True, self._limit, int(remaining), reset)
@@ -95,10 +119,11 @@ class RedisTokenBucket(_RedisLimiter):
         *,
         prefix: str = "rl",
         now_ms: NowMs | None = None,
+        breaker: CircuitBreaker | None = None,
     ) -> None:
         if refill_rate <= 0:
             raise ValueError("refill_rate must be > 0 tokens per second")
-        super().__init__(client, capacity, prefix=prefix, now_ms=now_ms)
+        super().__init__(client, capacity, prefix=prefix, now_ms=now_ms, breaker=breaker)
         self._rate = refill_rate
 
     def hit(self, key: str, cost: int = 1) -> Decision:
@@ -118,10 +143,11 @@ class RedisFixedWindow(_RedisLimiter):
         *,
         prefix: str = "rl",
         now_ms: NowMs | None = None,
+        breaker: CircuitBreaker | None = None,
     ) -> None:
         if window <= 0:
             raise ValueError("window must be > 0 seconds")
-        super().__init__(client, limit, prefix=prefix, now_ms=now_ms)
+        super().__init__(client, limit, prefix=prefix, now_ms=now_ms, breaker=breaker)
         self._window_ms = window * 1000
 
     def hit(self, key: str, cost: int = 1) -> Decision:
@@ -141,10 +167,11 @@ class RedisSlidingWindow(_RedisLimiter):
         *,
         prefix: str = "rl",
         now_ms: NowMs | None = None,
+        breaker: CircuitBreaker | None = None,
     ) -> None:
         if window <= 0:
             raise ValueError("window must be > 0 seconds")
-        super().__init__(client, limit, prefix=prefix, now_ms=now_ms)
+        super().__init__(client, limit, prefix=prefix, now_ms=now_ms, breaker=breaker)
         self._window_ms = window * 1000
 
     def hit(self, key: str, cost: int = 1) -> Decision:
@@ -167,10 +194,11 @@ class RedisSlidingCounter(_RedisLimiter):
         *,
         prefix: str = "rl",
         now_ms: NowMs | None = None,
+        breaker: CircuitBreaker | None = None,
     ) -> None:
         if window <= 0:
             raise ValueError("window must be > 0 seconds")
-        super().__init__(client, limit, prefix=prefix, now_ms=now_ms)
+        super().__init__(client, limit, prefix=prefix, now_ms=now_ms, breaker=breaker)
         self._window_ms = window * 1000
 
     def hit(self, key: str, cost: int = 1) -> Decision:
@@ -185,23 +213,20 @@ def build_redis_limiter(
     *,
     prefix: str = "rl",
     now_ms: NowMs | None = None,
+    breaker: CircuitBreaker | None = None,
 ) -> RateLimiter:
-    """The Redis twin of ``ratelimit.limits.build_limiter``."""
+    """The Redis twin of ``ratelimit.limits.build_limiter``. Pass one ``breaker`` to all
+    limiters that share a Redis, so they trip together."""
+    options: dict[str, Any] = {"prefix": prefix, "now_ms": now_ms, "breaker": breaker}
     match Algorithm(algorithm):
         case Algorithm.FIXED_WINDOW:
-            return RedisFixedWindow(
-                client, spec.requests, spec.period, prefix=prefix, now_ms=now_ms
-            )
+            return RedisFixedWindow(client, spec.requests, spec.period, **options)
         case Algorithm.SLIDING_WINDOW:
-            return RedisSlidingWindow(
-                client, spec.requests, spec.period, prefix=prefix, now_ms=now_ms
-            )
+            return RedisSlidingWindow(client, spec.requests, spec.period, **options)
         case Algorithm.SLIDING_COUNTER:
-            return RedisSlidingCounter(
-                client, spec.requests, spec.period, prefix=prefix, now_ms=now_ms
-            )
+            return RedisSlidingCounter(client, spec.requests, spec.period, **options)
         case Algorithm.TOKEN_BUCKET:
-            return RedisTokenBucket(client, spec.requests, spec.rate, prefix=prefix, now_ms=now_ms)
+            return RedisTokenBucket(client, spec.requests, spec.rate, **options)
         case Algorithm.COUNTER:
             raise ValueError("the naive counter is a teaching baseline; it has no Redis version")
 

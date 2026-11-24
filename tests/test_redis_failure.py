@@ -1,10 +1,14 @@
 """What happens when Redis is down: fail open (default) or fail closed."""
 
 import time
+from typing import Any
 
 import pytest
+import redis
 from fastapi.testclient import TestClient
 
+from ratelimit import FakeClock
+from ratelimit.breaker import BreakerState, CircuitBreaker
 from ratelimit.decision import LimiterUnavailable
 from ratelimit.limits import LimitSpec
 from ratelimit.redis_limiters import RedisTokenBucket, connect
@@ -52,3 +56,55 @@ def test_an_outage_fails_fast() -> None:
     started = time.monotonic()
     c.get("/api/hello")
     assert time.monotonic() - started < 2
+
+
+class FlakyRedis:
+    """Just enough of a Redis client to count calls and fail on demand."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.up = False
+
+    def register_script(self, source: str) -> Any:
+        def run(keys: list[str], args: list[Any]) -> list[Any]:
+            self.calls += 1
+            if not self.up:
+                raise redis.ConnectionError("connection refused")
+            return [1, 4, "0", "1000"]
+
+        return run
+
+
+def test_breaker_stops_calling_redis_during_an_outage() -> None:
+    client = FlakyRedis()
+    clock = FakeClock()
+    breaker = CircuitBreaker(threshold=3, cooldown=5, clock=clock)
+    bucket = RedisTokenBucket(client, 5, 1.0, breaker=breaker)  # type: ignore[arg-type]
+    for _ in range(10):
+        with pytest.raises(LimiterUnavailable):
+            bucket.hit("k")
+    assert client.calls == 3  # the other 7 failed instantly without touching Redis
+    assert breaker.state is BreakerState.OPEN
+
+    client.up = True
+    clock.advance(5)
+    assert bucket.hit("k").allowed  # the trial call goes through and closes it
+    assert breaker.state is BreakerState.CLOSED
+
+
+def test_a_script_error_still_finishes_the_half_open_trial() -> None:
+    class BrokenScript(FlakyRedis):
+        def register_script(self, source: str) -> Any:
+            def run(keys: list[str], args: list[Any]) -> list[Any]:
+                raise redis.ResponseError("ERR user_script:1: boom")
+
+            return run
+
+    clock = FakeClock()
+    breaker = CircuitBreaker(threshold=1, cooldown=5, clock=clock)
+    breaker.record_failure()
+    clock.advance(5)
+    bucket = RedisTokenBucket(BrokenScript(), 5, 1.0, breaker=breaker)  # type: ignore[arg-type]
+    with pytest.raises(redis.ResponseError):
+        bucket.hit("k")  # a real bug propagates...
+    assert breaker.state is BreakerState.CLOSED  # ...but Redis answered, so it's up
