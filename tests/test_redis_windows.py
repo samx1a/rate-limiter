@@ -128,3 +128,31 @@ def test_server_clock_mode(redis_client: redis.Redis, prefix: str) -> None:
     for cls in (RedisFixedWindow, RedisSlidingWindow):
         limiter = cls(redis_client, 2, 60, prefix=prefix)
         assert [limiter.hit("k").allowed for _ in range(3)] == [True, True, False]
+
+
+def test_fixed_clock_stepping_back_does_not_reset_the_count(
+    redis_client: redis.Redis, prefix: str
+) -> None:
+    """Redis TIME can jump back (failover to a replica, an NTP step). Going back across
+    a window edge must not hand out a fresh window, or the clock jump leaks requests."""
+    now = [(START + 10.5) * 1000]
+    limiter = RedisFixedWindow(redis_client, 3, 10, prefix=prefix, now_ms=lambda: now[0])
+    assert all(limiter.hit("k").allowed for _ in range(3))
+
+    now[0] = (START + 9.5) * 1000  # one second back, into the previous window
+    blocked = limiter.hit("k")
+    assert not blocked.allowed
+    assert blocked.retry_after == pytest.approx(10.5)  # until the stored window ends
+
+    now[0] = (START + 20) * 1000  # the stored window really is over now
+    assert limiter.hit("k").allowed
+
+
+def test_sliding_clock_stepping_back_keeps_entries(redis_client: redis.Redis, prefix: str) -> None:
+    now = [(START + 10.5) * 1000]
+    limiter = RedisSlidingWindow(redis_client, 3, 10, prefix=prefix, now_ms=lambda: now[0])
+    assert all(limiter.hit("k").allowed for _ in range(3))
+    now[0] = (START + 9.5) * 1000
+    blocked = limiter.hit("k")
+    assert not blocked.allowed
+    assert blocked.retry_after == pytest.approx(11)  # entries at 10.5 expire at 20.5

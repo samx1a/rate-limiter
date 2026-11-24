@@ -94,3 +94,16 @@ def test_survives_a_script_cache_flush(redis_client: redis.Redis, prefix: str) -
     bucket.hit("k")
     redis_client.script_flush()  # e.g. a Redis restart or failover
     assert bucket.hit("k").allowed
+
+
+def test_clock_stepping_back_neither_refills_nor_breaks(
+    redis_client: redis.Redis, prefix: str
+) -> None:
+    now = [1_700_000_010_000.0]
+    bucket = RedisTokenBucket(redis_client, 3, 1.0, prefix=prefix, now_ms=lambda: now[0])
+    assert all(bucket.hit("k").allowed for _ in range(3))
+    now[0] -= 5_000  # Redis TIME jumped 5 seconds back
+    assert not bucket.hit("k").allowed
+    now[0] += 6_000  # 1 second past the last real refill: exactly 1 token back
+    assert bucket.hit("k").allowed
+    assert not bucket.hit("k").allowed

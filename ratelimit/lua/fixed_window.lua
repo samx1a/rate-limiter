@@ -21,13 +21,18 @@ else
 end
 
 local index = math.floor(now / window)
-local ends_in = (index + 1) * window - now
 
 local state = redis.call("HMGET", KEYS[1], "w", "n")
+local stored = tonumber(state[1])
 local used = 0
-if tonumber(state[1]) == index then
+if stored ~= nil and stored >= index then
+  -- Same window, or the clock stepped back (failover to a replica, an NTP step).
+  -- Keep counting in the newest window we have seen; treating the older index as a
+  -- fresh window would hand out a whole extra limit.
+  index = stored
   used = tonumber(state[2])
 end
+local ends_in = (index + 1) * window - now
 
 if used + cost > limit then
   local retry = ends_in
