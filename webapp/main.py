@@ -4,6 +4,9 @@ No ``from __future__ import annotations`` here: FastAPI reads parameter annotati
 runtime, and string annotations cannot see aliases defined inside ``create_app``.
 """
 
+import base64
+import hashlib
+import re
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -68,6 +71,32 @@ LIMITED_RESPONSES: dict[int | str, dict[str, Any]] = {
 DEMO_PAGE = (Path(__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
 
 
+def _script_hashes(html: str) -> str:
+    """CSP hashes of the page's inline scripts, so the policy can allow exactly those
+    scripts and nothing an attacker manages to inject."""
+    scripts = re.findall(r"<script>(.*?)</script>", html, flags=re.DOTALL)
+    digests = (base64.b64encode(hashlib.sha256(s.encode()).digest()).decode() for s in scripts)
+    return " ".join(f"'sha256-{d}'" for d in digests)
+
+
+DEMO_CSP = "; ".join(
+    [
+        "default-src 'none'",
+        f"script-src {_script_hashes(DEMO_PAGE)}",
+        "style-src 'unsafe-inline'",  # one <style> block and two style="" attributes
+        "connect-src 'self'",  # fetch() to /api/*
+        "img-src 'self' data:",
+        "base-uri 'none'",
+        "form-action 'none'",
+        "frame-ancestors 'none'",
+    ]
+)
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+}
+
+
 def redis_client(settings: Settings) -> redis.Redis | None:
     if settings.backend is not Backend.REDIS:
         return None
@@ -128,6 +157,14 @@ def create_app(
             client.close()  # give the pooled connections back on shutdown
 
     app = FastAPI(title="rate-limiter", version="0.1.0", lifespan=lifespan)
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next: Any) -> Any:
+        response = await call_next(request)
+        for name, value in SECURITY_HEADERS.items():
+            response.headers.setdefault(name, value)
+        return response
+
     app.state.settings = settings
     app.state.service = service
 
@@ -189,7 +226,10 @@ def create_app(
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     def demo_page() -> HTMLResponse:
-        return HTMLResponse(DEMO_PAGE, headers={"Cache-Control": "public, max-age=300"})
+        return HTMLResponse(
+            DEMO_PAGE,
+            headers={"Cache-Control": "public, max-age=300", "Content-Security-Policy": DEMO_CSP},
+        )
 
     @app.get("/api/simulate")
     def simulate_route(scenario: Scenario = Scenario.EDGE_BURST) -> dict[str, Any]:

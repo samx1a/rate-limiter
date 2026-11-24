@@ -41,3 +41,26 @@ def test_demo_page_and_simulate_route() -> None:
     data = c.get("/api/simulate", params={"scenario": "steady"}).json()
     assert data["scenario"] == "steady" and len(data["rows"]) == 4
     assert c.get("/api/simulate", params={"scenario": "nope"}).status_code == 422
+
+
+def test_demo_page_csp_allows_exactly_its_own_script() -> None:
+    import base64
+    import hashlib
+    import re
+
+    c = TestClient(create_app(Settings()))
+    page = c.get("/")
+    csp = page.headers["Content-Security-Policy"]
+    (script,) = re.findall(r"<script>(.*?)</script>", page.text, flags=re.DOTALL)
+    digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
+    assert f"script-src 'sha256-{digest}'" in csp
+    assert "'unsafe-inline'" not in csp.split("script-src")[1].split(";")[0]
+    assert "frame-ancestors 'none'" in csp
+
+
+def test_every_response_gets_basic_security_headers() -> None:
+    c = TestClient(create_app(Settings()))
+    for path in ("/", "/api/health", "/api/hello"):
+        headers = c.get(path).headers
+        assert headers["X-Content-Type-Options"] == "nosniff", path
+        assert headers["Referrer-Policy"] == "no-referrer", path
