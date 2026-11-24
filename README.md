@@ -11,7 +11,7 @@ so the limit still holds when there are multiple servers.
 (FastAPI on Vercel, state in Redis Cloud, both in Washington, D.C.)
 
 The demo lets you spam requests until you get a 429, and it also replays the same
-traffic through three algorithms side by side so you can see where they differ.
+traffic through four algorithms side by side so you can see where they differ.
 
 ## What's in here
 

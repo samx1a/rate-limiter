@@ -13,6 +13,9 @@ def test_edge_burst_shows_fixed_window_letting_twice_the_limit_through() -> None
     result = rows(Scenario.EDGE_BURST)
     assert result["fixed_window"]["max_in_burst_span"] == 10  # 2 x limit within 2s
     assert result["sliding_window"]["max_in_burst_span"] == 5
+    assert result["sliding_counter"]["max_in_burst_span"] == 5
+    # At t=15 half the earlier window is still in view: 2.5 counted, so 2 more fit.
+    assert result["sliding_counter"]["admitted"] == 7
     # Token bucket spends its burst of 5 before the edge; 0.5/s refill admits nothing
     # more within the next second.
     assert result["token_bucket"]["max_in_burst_span"] == 5
@@ -36,5 +39,5 @@ def test_demo_page_and_simulate_route() -> None:
     assert page.status_code == 200 and "text/html" in page.headers["content-type"]
     assert "<title>" in page.text
     data = c.get("/api/simulate", params={"scenario": "steady"}).json()
-    assert data["scenario"] == "steady" and len(data["rows"]) == 3
+    assert data["scenario"] == "steady" and len(data["rows"]) == 4
     assert c.get("/api/simulate", params={"scenario": "nope"}).status_code == 422

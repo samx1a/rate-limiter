@@ -17,7 +17,12 @@ SPEC = LimitSpec(5, 10)  # 5 requests per 10 seconds
 # the most admitted in any 2 seconds. (A token bucket legitimately admits more than 5
 # in some 10s spans: its promise is "burst of 5, then 0.5/s", not "5 per any 10s".)
 BURST_SPAN = 2.0
-COMPARED = (Algorithm.FIXED_WINDOW, Algorithm.SLIDING_WINDOW, Algorithm.TOKEN_BUCKET)
+COMPARED = (
+    Algorithm.FIXED_WINDOW,
+    Algorithm.SLIDING_WINDOW,
+    Algorithm.SLIDING_COUNTER,
+    Algorithm.TOKEN_BUCKET,
+)
 
 
 class Scenario(StrEnum):

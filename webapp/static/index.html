@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rate Limiter Demo</title>
-<meta name="description" content="Try a rate limiter: send requests, hit the limit, and compare fixed window, sliding window and token bucket.">
+<meta name="description" content="Try a rate limiter: send requests, hit the limit, and compare fixed window, sliding window, sliding counter and token bucket.">
 <style>
   :root {
     --bg: #f7f7f5; --panel: #ffffff; --text: #1b1b19; --muted: #6b6b66; --line: #e3e3de;
@@ -96,7 +96,7 @@
   </section>
 
   <section aria-labelledby="cmp-title">
-    <h2 id="cmp-title">Same traffic, three algorithms</h2>
+    <h2 id="cmp-title">Same traffic, four algorithms</h2>
     <p class="muted">Limit: <span class="mono">5 requests / 10 s</span>. The server replays the
       same requests through each limiter on a fake clock, so this is the actual code, not a drawing.</p>
     <div class="row" role="group" aria-label="Scenario">
@@ -197,7 +197,7 @@
     for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
     return node;
   };
-  const NAMES = { fixed_window: "Fixed window", sliding_window: "Sliding window", token_bucket: "Token bucket" };
+  const NAMES = { fixed_window: "Fixed window", sliding_window: "Sliding window", sliding_counter: "Sliding counter", token_bucket: "Token bucket" };
 
   let lastData = null;
   function draw(data) {
@@ -245,8 +245,8 @@
       wrap.append(head, svg, axis); box.append(wrap);
     }
     $("sim-note").textContent = data.scenario === "edge_burst"
-      ? "Fixed window lets 10 through in 2 seconds (5 right before the edge, 5 right after), double the limit. Sliding window holds it at 5. Token bucket spends its burst of 5, blocks the second group, and lets a few more in once tokens refill."
-      : "With steady overload all three settle at about the allowed rate. Fixed window lets a clump through at the start of each window; token bucket spends its initial burst, then admits one every 2 seconds.";
+      ? "Fixed window lets 10 through in 2 seconds (5 right before the edge, 5 right after), double the limit. Sliding window holds it at 5. Sliding counter also holds it at 5, then at t = 15 it estimates half of the first 5 are still in view and lets 2 more in. Token bucket spends its burst of 5, blocks the second group, and lets a few more in once tokens refill."
+      : "With steady overload they all settle at about the allowed rate. Fixed window and sliding window let a clump of 5 through every 10 seconds. Sliding counter and token bucket spread it out to about one every 2 seconds after the first burst.";
   }
 
   async function load(scenario) {
