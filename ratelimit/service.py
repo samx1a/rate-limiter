@@ -20,6 +20,7 @@ Rules:
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -91,6 +92,10 @@ class RateLimitService:
         order = {Scope.IP: 0, Scope.USER: 1}
         self._policies = tuple(sorted(policies, key=lambda p: order[p.scope]))
         self._fail_open = fail_open
+        # Policies whose store is currently unreachable. Used to log an outage once
+        # when it starts and once when it ends, not on every request in between.
+        self._down: set[str] = set()
+        self._down_lock = threading.Lock()
 
     @property
     def policies(self) -> tuple[Policy, ...]:
@@ -111,16 +116,40 @@ class RateLimitService:
             key = self.key(policy, subject)
             try:
                 decision = policy.limiter.hit(key, policy.cost)
-            except LimiterUnavailable:
+            except LimiterUnavailable as exc:
+                self._mark_down(policy, exc)
                 if policy.fallback is not None:
                     decision = policy.fallback.hit(key, policy.cost)
                     degraded = True
                 elif not self._fail_open:
                     raise
                 else:
-                    log.warning("rate limiter %r unavailable; failing open", policy.name)
                     return Verdict(True, tuple(results), degraded=True)
+            else:
+                self._mark_up(policy)
             results.append(PolicyResult(policy, decision))
             if not decision.allowed:
                 return Verdict(False, tuple(results), degraded=degraded)
         return Verdict(True, tuple(results), degraded=degraded)
+
+    def _mark_down(self, policy: Policy, exc: Exception) -> None:
+        with self._down_lock:
+            if policy.name in self._down:
+                return
+            self._down.add(policy.name)
+        if policy.fallback is not None:
+            action = "limiting from local memory"
+        elif self._fail_open:
+            action = "failing open"
+        else:
+            action = "refusing requests"
+        log.warning("rate limit store for %r unavailable (%s); %s", policy.name, exc, action)
+
+    def _mark_up(self, policy: Policy) -> None:
+        if policy.name not in self._down:  # fast path, no lock: the usual case
+            return
+        with self._down_lock:
+            if policy.name not in self._down:
+                return
+            self._down.discard(policy.name)
+        log.warning("rate limit store for %r is back", policy.name)

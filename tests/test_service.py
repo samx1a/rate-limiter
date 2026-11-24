@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 
 from ratelimit import Decision, FakeClock
@@ -151,3 +153,34 @@ def test_policy_names_must_be_unique() -> None:
         RateLimitService(
             [Policy("a", Scope.IP, limiter, period=1), Policy("a", Scope.USER, limiter, period=1)]
         )
+
+
+class SwitchableLimiter(RecordingLimiter):
+    def __init__(self) -> None:
+        super().__init__(TokenBucket(100, 1.0, FakeClock()))
+        self.up = True
+
+    def hit(self, key: str, cost: int = 1) -> Decision:
+        if not self.up:
+            raise LimiterUnavailable("store down")
+        return super().hit(key, cost)
+
+
+def test_an_outage_is_logged_once_when_it_starts_and_once_when_it_ends(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    store = SwitchableLimiter()
+    svc = RateLimitService([Policy("ip", Scope.IP, store, period=1)])
+    who = Identity(ip="1.2.3.4")
+    with caplog.at_level(logging.WARNING, logger="ratelimit.service"):
+        svc.check(who)
+        store.up = False
+        for _ in range(50):
+            svc.check(who)
+        store.up = True
+        for _ in range(50):
+            svc.check(who)
+    messages = [r.getMessage() for r in caplog.records]
+    assert len(messages) == 2
+    assert "unavailable (store down); failing open" in messages[0]
+    assert "is back" in messages[1]
