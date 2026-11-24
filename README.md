@@ -144,6 +144,10 @@ On Vercel I set `TRUSTED_IP_HEADER=x-real-ip`, since Vercel overwrites that head
 itself. Sending a fake `X-Forwarded-For` to the live site doesn't change your IP (I
 checked).
 
+IPv6 clients are limited per /64 network instead of per address. A home connection or
+a cloud server usually gets a whole /64 to itself, which is billions of addresses, so
+limiting each address on its own would let someone pick a fresh one for every request.
+
 ## Does it actually work
 
 - **Tests:** 195 tests. CI runs them on Python 3.11, 3.12 and 3.13 against Redis 7, plus

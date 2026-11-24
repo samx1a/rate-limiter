@@ -10,6 +10,10 @@ Trust boundaries matter here. A client can send any header it likes, so:
   pick their own IP and dodge per-IP limits.
   If no valid IP can be found, the request is counted under ``"unknown"``, so all
   such requests share one (strict) bucket rather than escaping the limit.
+- **IPv6**: one home connection or one cloud VM usually gets a whole /64, which is
+  2^64 addresses. Limiting each address separately would let anyone dodge the per-IP
+  limit by picking a new address per request, so IPv6 clients are limited per /64.
+  IPv4-mapped addresses (``::ffff:1.2.3.4``) count as the IPv4 address they wrap.
 - **User**: this demo reads ``X-User-Id`` and validates its shape. In a real system
   the user id comes from a verified session or token, never a raw header.
 """
@@ -60,3 +64,20 @@ def _is_ip(value: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+IPV6_PREFIX = 64
+
+
+def limit_subject(ip: str, ipv6_prefix: int = IPV6_PREFIX) -> str:
+    """The string the per-IP limit is keyed on: the IPv4 address itself, or the IPv6
+    network it belongs to (e.g. ``2001:db8:1:2::/64``)."""
+    try:
+        address = ipaddress.ip_address(ip)
+    except ValueError:
+        return ip  # "unknown"
+    if isinstance(address, ipaddress.IPv6Address):
+        if address.ipv4_mapped is not None:
+            return str(address.ipv4_mapped)
+        return str(ipaddress.IPv6Network((address, ipv6_prefix), strict=False))
+    return str(address)

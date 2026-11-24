@@ -59,3 +59,11 @@ def test_health_and_info_are_not_limited() -> None:
 
 def test_ready_without_redis() -> None:
     assert client().get("/api/ready").json() == {"ok": True, "backend": "memory"}
+
+
+def test_ipv6_clients_share_a_limit_per_64() -> None:
+    """Rotating through addresses in one /64 doesn't dodge the per-IP limit."""
+    c = client(ip_limit=3)
+    codes = [get(c, user=None, ip=f"2001:db8:1:2::{n:x}") for n in range(1, 5)]
+    assert codes == [200, 200, 200, 429]
+    assert get(c, user=None, ip="2001:db8:1:3::1") == 200  # a different /64

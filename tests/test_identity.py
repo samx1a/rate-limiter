@@ -1,6 +1,6 @@
 import pytest
 
-from webapp.identity import InvalidIdentity, client_ip, user_from_headers
+from webapp.identity import InvalidIdentity, client_ip, limit_subject, user_from_headers
 
 
 @pytest.mark.parametrize(
@@ -47,3 +47,18 @@ def test_ipv6_and_unknown_peer() -> None:
     assert client_ip("::1", {}, None) == "::1"
     assert client_ip(None, {}, None) == "unknown"
     assert client_ip("testclient", {}, None) == "unknown"
+
+
+@pytest.mark.parametrize(
+    ("ip", "subject"),
+    [
+        ("203.0.113.7", "203.0.113.7"),
+        ("2001:db8:1:2:aaaa:bbbb:cccc:dddd", "2001:db8:1:2::/64"),
+        ("2001:db8:1:2::1", "2001:db8:1:2::/64"),
+        ("2001:db8:1:3::1", "2001:db8:1:3::/64"),  # the next /64 is someone else
+        ("::ffff:198.51.100.4", "198.51.100.4"),
+        ("unknown", "unknown"),
+    ],
+)
+def test_limit_subject(ip: str, subject: str) -> None:
+    assert limit_subject(ip) == subject

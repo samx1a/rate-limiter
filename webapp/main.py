@@ -20,7 +20,7 @@ from ratelimit.limits import LimitSpec, build_limiter
 from ratelimit.redis_limiters import build_redis_limiter, connect
 from ratelimit.service import Identity, Policy, RateLimitService, Scope, Verdict
 from webapp.headers import rate_limit_headers
-from webapp.identity import InvalidIdentity, client_ip, user_from_headers
+from webapp.identity import InvalidIdentity, client_ip, limit_subject, user_from_headers
 from webapp.settings import Backend, Settings
 from webapp.simulate import Scenario, simulate
 
@@ -96,7 +96,8 @@ def create_app(
         except InvalidIdentity as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         peer = request.client.host if request.client else None
-        return Identity(ip=client_ip(peer, request.headers, settings.trusted_ip_header), user=user)
+        ip = client_ip(peer, request.headers, settings.trusted_ip_header)
+        return Identity(ip=limit_subject(ip), user=user)
 
     # A plain (sync) dependency: FastAPI runs it in a worker thread, so a slow
     # limiter store never blocks the event loop.
