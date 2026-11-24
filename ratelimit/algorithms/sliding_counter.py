@@ -68,6 +68,15 @@ class SlidingWindowCounter(WindowedLimiter[tuple[int, int, int]]):
             self._reset_after(index, current, previous, now),
         )
 
+    def _is_idle(self, state: tuple[int, int, int], now: float) -> bool:
+        stored, current, previous = state
+        index = math.floor(now / self._window)
+        if stored < index - 1:
+            return True  # both counts are out of view
+        if stored == index - 1:
+            return current == 0  # current becomes previous; nothing else is in view
+        return current == 0 and previous == 0
+
     def _remaining(self, estimate: float) -> int:
         return max(0, math.floor(self._limit - estimate + EPSILON))
 

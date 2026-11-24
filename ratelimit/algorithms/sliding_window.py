@@ -61,6 +61,10 @@ class SlidingWindowLog(WindowedLimiter[_Log]):
         state.total += cost
         return Decision(True, self._limit, self._limit - state.total, self._reset_after(log, now))
 
+    def _is_idle(self, state: _Log, now: float) -> bool:
+        # The newest entry is the last to expire.
+        return not state.entries or state.entries[-1][0] + self._window <= now
+
     def _reset_after(self, log: deque[tuple[float, int]], now: float) -> float:
         """Time until every entry has expired, i.e. the full limit is back."""
         return log[-1][0] + self._window - now if log else 0.0

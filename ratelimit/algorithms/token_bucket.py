@@ -60,3 +60,7 @@ class TokenBucket(InMemoryLimiter[tuple[float, float]]):
             return Decision(True, self._limit, remaining, reset_after)
         retry_after = math.inf if cost > self._limit else (cost - tokens) / self._rate
         return Decision(False, self._limit, remaining, reset_after, retry_after=retry_after)
+
+    def _is_idle(self, state: tuple[float, float], now: float) -> bool:
+        tokens, last = state
+        return tokens + max(0.0, now - last) * self._rate + EPSILON >= self._limit  # full

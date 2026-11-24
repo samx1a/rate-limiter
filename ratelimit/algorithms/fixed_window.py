@@ -48,3 +48,6 @@ class FixedWindow(WindowedLimiter[tuple[int, int]]):
         used += cost
         self._state[key] = (index, used)
         return Decision(True, self._limit, self._limit - used, window_ends_in)
+
+    def _is_idle(self, state: tuple[int, int], now: float) -> bool:
+        return state[0] < math.floor(now / self._window)  # its window is over
