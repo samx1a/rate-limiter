@@ -7,3 +7,4 @@ tests
 loadtest
 docs
 .github
+.hypothesis
