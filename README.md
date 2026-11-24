@@ -113,6 +113,11 @@ if it's back. Without it, every request during an outage would still pay the 250
 
 ## Using the API
 
+`GET /api/metrics` returns counters in the Prometheus text format: allowed and blocked
+per policy, how often the Redis fallback kicked in, and a histogram of how long the
+limit check takes. The numbers are per server process, so on Vercel each instance has
+its own.
+
 `GET /api/health` only says the process is up. `GET /api/ready` also pings Redis and
 returns 503 if it can't reach it. I kept them separate on purpose: if a platform
 restarts servers based on the health check, a Redis outage shouldn't get every healthy

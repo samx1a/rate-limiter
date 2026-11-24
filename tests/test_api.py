@@ -117,3 +117,15 @@ def test_documented_429_matches_a_real_one() -> None:
     assert real.json().keys() == example.keys()
     assert real.json()["detail"].keys() == example["detail"].keys()
     assert all(name in real.headers for name in documented["headers"])  # case-insensitive
+
+
+def test_metrics_endpoint() -> None:
+    c = client(user_limit=1)
+    get(c)
+    get(c)
+    response = c.get("/api/metrics")
+    assert response.headers["content-type"].startswith("text/plain")
+    text = response.text
+    assert 'ratelimit_decisions_total{policy="user",result="allowed"} 1' in text
+    assert 'ratelimit_decisions_total{policy="user",result="blocked"} 1' in text
+    assert "ratelimit_check_duration_ms_count 2" in text

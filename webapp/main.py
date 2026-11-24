@@ -15,7 +15,7 @@ from typing import Annotated, Any
 
 import redis
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from ratelimit.breaker import CircuitBreaker
 from ratelimit.decision import LimiterUnavailable, RateLimiter
@@ -204,6 +204,7 @@ def create_app(
             # Redis round trip was measured in production (see docs/LOAD_TEST.md).
             elapsed_ms = (time.perf_counter() - started) * 1000
             headers["Server-Timing"] = f"ratelimit;dur={elapsed_ms:.2f}"
+            service.metrics.observe_latency(elapsed_ms)
             if not verdict.allowed:
                 binding = verdict.binding
                 raise HTTPException(
@@ -254,6 +255,11 @@ def create_app(
             return {"ok": False, "backend": "redis", "error": type(exc).__name__}
         ping_ms = round((time.perf_counter() - started) * 1000, 2)
         return {"ok": True, "backend": "redis", "ping_ms": ping_ms}
+
+    @app.get("/api/metrics", response_class=PlainTextResponse)
+    def metrics() -> PlainTextResponse:
+        """Prometheus text format. Per process: each server instance has its own."""
+        return PlainTextResponse(service.metrics.render(), media_type="text/plain; version=0.0.4")
 
     @app.get("/api/info")
     def info() -> dict[str, Any]:
