@@ -17,6 +17,7 @@ import pytest
 from ratelimit import FakeClock, RateLimiter
 from ratelimit.algorithms.counter import NaiveCounter
 from ratelimit.algorithms.fixed_window import FixedWindow
+from ratelimit.algorithms.sliding_counter import SlidingWindowCounter
 from ratelimit.algorithms.sliding_window import SlidingWindowLog
 from ratelimit.algorithms.token_bucket import TokenBucket
 
@@ -29,6 +30,7 @@ FACTORIES: dict[str, Callable[[], RateLimiter]] = {
     "counter": lambda: NaiveCounter(LIMIT),
     "fixed_window": lambda: FixedWindow(LIMIT, 60, FakeClock()),
     "sliding_window": lambda: SlidingWindowLog(LIMIT, 60, FakeClock()),
+    "sliding_counter": lambda: SlidingWindowCounter(LIMIT, 60, FakeClock()),
     "token_bucket": lambda: TokenBucket(LIMIT, 1.0, FakeClock()),
 }
 
