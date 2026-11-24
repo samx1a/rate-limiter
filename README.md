@@ -100,9 +100,12 @@ Some details:
   processes (own memory, own connection) that all hammer one key. Together they get
   exactly the limit through. I ran it against the cloud Redis too, not just locally.
 
-**If Redis goes down:** by default the service fails open, meaning it logs the problem
-and lets requests through without limiting. A rate limiter taking the whole site down
-seemed worse than briefly not limiting. Set `FAIL_OPEN=false` to return 503 instead.
+**If Redis goes down:** each server switches to limiting from its own memory until
+Redis is back. That isn't perfect, since with 4 servers a client could get up to 4x the
+limit, but it's a lot better than no limit at all. If you turn that off
+(`LOCAL_FALLBACK=false`), the service fails open: it logs the problem and lets requests
+through. A rate limiter taking the whole site down seemed worse than briefly not
+limiting. Set `FAIL_OPEN=false` too if you'd rather return 503.
 Redis commands time out after 250 ms, so an outage doesn't make every request hang.
 On top of that there's a circuit breaker: after 3 failures in a row it stops calling
 Redis and fails instantly, then every 5 seconds lets one request try Redis again to see
@@ -182,7 +185,8 @@ REDIS_URL=redis://127.0.0.1:6399/0 uv run pytest
 | `IP_LIMIT` | `60/1m` | per-IP limit, written like `10/s`, `100/1m`, `5/30s` |
 | `USER_LIMIT` | `10/10s` | per-user limit |
 | `TRUSTED_IP_HEADER` | none | proxy header to read the client IP from (`x-real-ip` on Vercel) |
-| `FAIL_OPEN` | `true` | allow requests when Redis is unreachable |
+| `LOCAL_FALLBACK` | `true` | when Redis is unreachable, limit per server from memory |
+| `FAIL_OPEN` | `true` | with no local fallback, allow requests when Redis is unreachable |
 | `REDIS_TIMEOUT_MS` | `250` | per-command Redis timeout |
 | `RATE_LIMIT_PREFIX` | `rl` | prefix for Redis keys |
 

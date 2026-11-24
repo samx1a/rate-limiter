@@ -47,6 +47,9 @@ class Settings:
     ip_limit: LimitSpec = DEFAULT_IP_LIMIT
     user_limit: LimitSpec = DEFAULT_USER_LIMIT
     trusted_ip_header: str | None = None
+    # While Redis is down: limit per server from memory (local_fallback), else let
+    # everything through (fail_open) or refuse with 503.
+    local_fallback: bool = True
     fail_open: bool = True
 
     def __post_init__(self) -> None:
@@ -89,6 +92,7 @@ class Settings:
                 ip_limit=read("IP_LIMIT", parse_limit, defaults.ip_limit),
                 user_limit=read("USER_LIMIT", parse_limit, defaults.user_limit),
                 trusted_ip_header=env.get("TRUSTED_IP_HEADER") or None,
+                local_fallback=read("LOCAL_FALLBACK", _flag, defaults.local_fallback),
                 fail_open=read("FAIL_OPEN", _flag, defaults.fail_open),
             )
         except ConfigError:

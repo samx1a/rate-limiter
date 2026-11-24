@@ -18,11 +18,12 @@ from webapp.settings import Backend, Settings
 DEAD_REDIS = "redis://127.0.0.1:1/0"  # nothing listens on port 1
 
 
-def settings(fail_open: bool) -> Settings:
+def settings(fail_open: bool, local_fallback: bool = False) -> Settings:
     return Settings(
         backend=Backend.REDIS,
         redis_url=DEAD_REDIS,
         fail_open=fail_open,
+        local_fallback=local_fallback,
         ip_limit=LimitSpec(5, 60),
         user_limit=LimitSpec(5, 60),
     )
@@ -49,6 +50,16 @@ def test_fail_closed_returns_503() -> None:
     assert response.status_code == 503
     assert response.headers["Retry-After"] == "1"
     assert response.json()["detail"]["error"] == "limiter_unavailable"
+
+
+def test_local_fallback_keeps_limiting_when_redis_is_down() -> None:
+    c = TestClient(create_app(settings(fail_open=False, local_fallback=True)))
+    codes = [c.get("/api/hello", headers={"x-user-id": "alice"}).status_code for _ in range(7)]
+    assert codes == [200] * 5 + [429] * 2  # limits are 5/60s, enforced from memory
+    # A new user from the same IP: the per-IP limit is held in memory too.
+    response = c.get("/api/hello", headers={"x-user-id": "bob"})
+    assert response.status_code == 429
+    assert response.json()["detail"]["policy"] == "ip"
 
 
 def test_an_outage_fails_fast() -> None:

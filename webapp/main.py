@@ -25,6 +25,9 @@ DEMO_PAGE = (Path(__file__).parent / "static" / "index.html").read_text(encoding
 
 
 def build_service(settings: Settings) -> RateLimitService:
+    def local(spec: LimitSpec) -> RateLimiter:
+        return build_limiter(settings.algorithm, spec)
+
     if settings.backend is Backend.REDIS:
         assert settings.redis_url  # checked in Settings
         client = connect(settings.redis_url, timeout=settings.redis_timeout)
@@ -37,17 +40,22 @@ def build_service(settings: Settings) -> RateLimitService:
                 settings.algorithm, spec, client, prefix=settings.key_prefix, breaker=breaker
             )
 
-    else:
+        def fallback(spec: LimitSpec) -> RateLimiter | None:
+            return local(spec) if settings.local_fallback else None
 
-        def make(spec: LimitSpec) -> RateLimiter:
-            return build_limiter(settings.algorithm, spec)
+    else:
+        make = local
+
+        def fallback(spec: LimitSpec) -> RateLimiter | None:
+            return None  # memory can't be "down"
+
+    def policy(name: str, scope: Scope, spec: LimitSpec) -> Policy:
+        return Policy(name, scope, make(spec), period=spec.period, fallback=fallback(spec))
 
     return RateLimitService(
         [
-            Policy("ip", Scope.IP, make(settings.ip_limit), period=settings.ip_limit.period),
-            Policy(
-                "user", Scope.USER, make(settings.user_limit), period=settings.user_limit.period
-            ),
+            policy("ip", Scope.IP, settings.ip_limit),
+            policy("user", Scope.USER, settings.user_limit),
         ],
         fail_open=settings.fail_open,
     )
@@ -122,6 +130,7 @@ def create_app(
             "backend": str(settings.backend),
             "algorithm": str(settings.algorithm),
             "limits": {"ip": str(settings.ip_limit), "user": str(settings.user_limit)},
+            "local_fallback": settings.local_fallback,
             "fail_open": settings.fail_open,
         }
 
