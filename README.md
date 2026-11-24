@@ -113,6 +113,11 @@ if it's back. Without it, every request during an outage would still pay the 250
 
 ## Using the API
 
+`GET /api/health` only says the process is up. `GET /api/ready` also pings Redis and
+returns 503 if it can't reach it. I kept them separate on purpose: if a platform
+restarts servers based on the health check, a Redis outage shouldn't get every healthy
+server restarted.
+
 `GET /api/hello` is rate limited per IP (60 per minute) and per user (10 per 10
 seconds, token bucket). The user comes from an `X-User-Id` header. In a real app that
 would come from a login token, but a header keeps the demo simple.

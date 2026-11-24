@@ -142,7 +142,23 @@ def create_app(
 
     @app.get("/api/health")
     def health() -> dict[str, bool]:
+        """Liveness: the process is up. Doesn't touch Redis on purpose, so a Redis
+        outage never gets healthy app servers restarted."""
         return {"ok": True}
+
+    @app.get("/api/ready")
+    def ready(response: Response) -> dict[str, Any]:
+        """Readiness: can this server reach its limit store right now?"""
+        if client is None:
+            return {"ok": True, "backend": str(settings.backend)}
+        started = time.perf_counter()
+        try:
+            client.ping()
+        except (redis.ConnectionError, redis.TimeoutError) as exc:
+            response.status_code = 503
+            return {"ok": False, "backend": "redis", "error": type(exc).__name__}
+        ping_ms = round((time.perf_counter() - started) * 1000, 2)
+        return {"ok": True, "backend": "redis", "ping_ms": ping_ms}
 
     @app.get("/api/info")
     def info() -> dict[str, Any]:

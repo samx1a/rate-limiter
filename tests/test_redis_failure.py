@@ -119,3 +119,11 @@ def test_a_script_error_still_finishes_the_half_open_trial() -> None:
     with pytest.raises(redis.ResponseError):
         bucket.hit("k")  # a real bug propagates...
     assert breaker.state is BreakerState.CLOSED  # ...but Redis answered, so it's up
+
+
+def test_ready_reports_503_while_health_stays_ok() -> None:
+    c = TestClient(create_app(settings(fail_open=True)))
+    ready = c.get("/api/ready")
+    assert ready.status_code == 503
+    assert ready.json() == {"ok": False, "backend": "redis", "error": "ConnectionError"}
+    assert c.get("/api/health").status_code == 200  # don't restart over a Redis outage

@@ -36,6 +36,15 @@ def test_two_app_instances_share_limits_through_redis(
     assert server_a.get("/api/info").json()["backend"] == "redis"
 
 
+def test_ready_pings_redis(redis_client: redis.Redis, prefix: str) -> None:
+    settings = Settings(
+        backend=Backend.REDIS, redis_url=REDIS_URL, key_prefix=prefix, redis_timeout=5.0
+    )
+    body = TestClient(create_app(settings)).get("/api/ready").json()
+    assert body["ok"] is True and body["backend"] == "redis"
+    assert body["ping_ms"] >= 0
+
+
 def test_shutdown_closes_the_redis_client(
     redis_client: redis.Redis, prefix: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -55,3 +55,7 @@ def test_health_and_info_are_not_limited() -> None:
     info = c.get("/api/info").json()
     assert info["algorithm"] == "token_bucket"
     assert info["limits"] == {"ip": "1/60s", "user": "3/60s"}
+
+
+def test_ready_without_redis() -> None:
+    assert client().get("/api/ready").json() == {"ok": True, "backend": "memory"}
