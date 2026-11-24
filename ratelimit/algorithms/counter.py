@@ -25,7 +25,3 @@ class NaiveCounter(InMemoryLimiter[int]):
         used += cost
         self._state[key] = used
         return Decision(True, self._limit, self._limit - used, INF)
-
-    def reset(self, key: str) -> None:
-        with self._lock:
-            self._state.pop(key, None)

@@ -28,6 +28,8 @@ def test_unreachable_redis_raises_limiter_unavailable() -> None:
     bucket = RedisTokenBucket(connect(DEAD_REDIS), 5, 1.0)
     with pytest.raises(LimiterUnavailable):
         bucket.hit("k")
+    with pytest.raises(LimiterUnavailable):
+        bucket.reset("k")
 
 
 def test_fail_open_serves_requests_without_limit_headers() -> None:

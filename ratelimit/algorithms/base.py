@@ -36,6 +36,11 @@ class InMemoryLimiter(ABC, Generic[S]):
         with self._lock:
             return self._hit(key, cost)
 
+    def reset(self, key: str) -> None:
+        """Forget ``key``: its next request sees the full limit."""
+        with self._lock:
+            self._state.pop(key, None)
+
     @abstractmethod
     def _hit(self, key: str, cost: int) -> Decision:
         """Decide and record one request. Called with the lock held."""

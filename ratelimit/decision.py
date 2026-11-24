@@ -45,6 +45,11 @@ class RateLimiter(Protocol):
 
     def hit(self, key: str, cost: int = 1) -> Decision: ...
 
+    def reset(self, key: str) -> None:
+        """Forget ``key`` so its next request sees the full limit (e.g. support
+        unblocking a customer, or a test cleaning up)."""
+        ...
+
 
 class LimiterUnavailable(Exception):
     """The limiter's backing store (e.g. Redis) could not be reached."""

@@ -49,6 +49,7 @@ class _RedisLimiter:
         self._limit = limit
         self._prefix = prefix
         self._now_ms = now_ms
+        self._client = client
         self._script = load_script(client, self.script_name)
 
     @property
@@ -57,6 +58,12 @@ class _RedisLimiter:
 
     def redis_key(self, key: str) -> str:
         return f"{self._prefix}:{self.key_tag}:{key}"
+
+    def reset(self, key: str) -> None:
+        try:
+            self._client.delete(self.redis_key(key))
+        except (redis.ConnectionError, redis.TimeoutError) as exc:
+            raise LimiterUnavailable(str(exc)) from exc
 
     def _now_arg(self) -> str:
         return "" if self._now_ms is None else repr(float(self._now_ms()))

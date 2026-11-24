@@ -106,3 +106,13 @@ def test_keys_are_independent(make: Subject) -> None:
 def test_cost_above_limit_never_fits(make: Subject) -> None:
     blocked = make.limiter.hit("k", cost=LIMIT + 1)
     assert not blocked.allowed and blocked.retry_after == math.inf
+
+
+def test_reset_gives_the_full_limit_back(make: Subject) -> None:
+    for _ in range(LIMIT):
+        make.limiter.hit("k")
+        make.limiter.hit("other")
+    make.limiter.reset("k")
+    assert [make.limiter.hit("k").allowed for _ in range(LIMIT)] == [True] * LIMIT
+    assert not make.limiter.hit("other").allowed  # only the one key is forgotten
+    make.limiter.reset("never-seen")  # no error
