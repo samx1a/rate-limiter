@@ -45,10 +45,16 @@ def _ms_to_s(value: Any) -> float:
 
 
 class _RedisLimiter:
-    """Shared plumbing: key naming, the clock argument, decoding the script reply."""
+    """Shared plumbing: key naming, the clock argument, the breaker, decoding replies.
+
+    Subclasses set ``script_name``, ``key_tag`` and ``_param`` (the algorithm's second
+    number: window length in ms, or refill rate per second).
+    """
 
     script_name: str
     key_tag: str
+    needs_id = False  # the sliding log needs a unique id per request
+    _param: str
 
     def __init__(
         self,
@@ -67,6 +73,7 @@ class _RedisLimiter:
         self._breaker = breaker
         self._client = client
         self._script = load_script(client, self.script_name)
+        self._multi_script = load_script(client, self.script_name, "multi")
 
     @property
     def limit(self) -> int:
@@ -75,8 +82,19 @@ class _RedisLimiter:
     def redis_key(self, key: str) -> str:
         return f"{self._prefix}:{self.key_tag}:{key}"
 
+    def hit(self, key: str, cost: int = 1) -> Decision:
+        validate_cost(cost)
+        limit, param, cost, request_id = self._key_args(cost)
+        args = [limit, param, cost, self._now_arg(), request_id]
+        reply = self._call(lambda: self._script(keys=[self.redis_key(key)], args=args))
+        return self._decode(reply)
+
     def reset(self, key: str) -> None:
         self._call(lambda: self._client.delete(self.redis_key(key)))
+
+    def _key_args(self, cost: int) -> tuple[int, str, int, str]:
+        request_id = uuid.uuid4().hex if self.needs_id else ""
+        return self._limit, self._param, cost, request_id
 
     def _now_arg(self) -> str:
         return "" if self._now_ms is None else repr(float(self._now_ms()))
@@ -104,10 +122,8 @@ class _RedisLimiter:
             breaker.record_success()
         return result
 
-    def _run(self, key: str, args: Sequence[Any]) -> Decision:
-        allowed, remaining, retry_ms, reset_ms = self._call(
-            lambda: self._script(keys=[self.redis_key(key)], args=list(args))
-        )
+    def _decode(self, reply: Sequence[Any]) -> Decision:
+        allowed, remaining, retry_ms, reset_ms = reply
         reset = _ms_to_s(reset_ms)
         if int(allowed):
             return Decision(True, self._limit, int(remaining), reset)
@@ -131,86 +147,71 @@ class RedisTokenBucket(_RedisLimiter):
         if refill_rate <= 0:
             raise ValueError("refill_rate must be > 0 tokens per second")
         super().__init__(client, capacity, prefix=prefix, now_ms=now_ms, breaker=breaker)
-        self._rate = refill_rate
-
-    def hit(self, key: str, cost: int = 1) -> Decision:
-        validate_cost(cost)
-        return self._run(key, [self._limit, repr(self._rate), cost, self._now_arg()])
+        self._param = repr(float(refill_rate))
 
 
-class RedisFixedWindow(_RedisLimiter):
+class _RedisWindowed(_RedisLimiter):
+    def __init__(
+        self,
+        client: redis.Redis,
+        limit: int,
+        window: float,
+        *,
+        prefix: str = "rl",
+        now_ms: NowMs | None = None,
+        breaker: CircuitBreaker | None = None,
+    ) -> None:
+        if window <= 0:
+            raise ValueError("window must be > 0 seconds")
+        super().__init__(client, limit, prefix=prefix, now_ms=now_ms, breaker=breaker)
+        self._param = repr(float(window * 1000))
+
+
+class RedisFixedWindow(_RedisWindowed):
     script_name = "fixed_window"
     key_tag = "fw"
 
-    def __init__(
-        self,
-        client: redis.Redis,
-        limit: int,
-        window: float,
-        *,
-        prefix: str = "rl",
-        now_ms: NowMs | None = None,
-        breaker: CircuitBreaker | None = None,
-    ) -> None:
-        if window <= 0:
-            raise ValueError("window must be > 0 seconds")
-        super().__init__(client, limit, prefix=prefix, now_ms=now_ms, breaker=breaker)
-        self._window_ms = window * 1000
 
-    def hit(self, key: str, cost: int = 1) -> Decision:
-        validate_cost(cost)
-        return self._run(key, [self._limit, repr(self._window_ms), cost, self._now_arg()])
-
-
-class RedisSlidingWindow(_RedisLimiter):
+class RedisSlidingWindow(_RedisWindowed):
     script_name = "sliding_window"
     key_tag = "sw"
-
-    def __init__(
-        self,
-        client: redis.Redis,
-        limit: int,
-        window: float,
-        *,
-        prefix: str = "rl",
-        now_ms: NowMs | None = None,
-        breaker: CircuitBreaker | None = None,
-    ) -> None:
-        if window <= 0:
-            raise ValueError("window must be > 0 seconds")
-        super().__init__(client, limit, prefix=prefix, now_ms=now_ms, breaker=breaker)
-        self._window_ms = window * 1000
-
-    def hit(self, key: str, cost: int = 1) -> Decision:
-        validate_cost(cost)
-        args = [self._limit, repr(self._window_ms), cost, self._now_arg(), uuid.uuid4().hex]
-        return self._run(key, args)
+    needs_id = True
 
 
-class RedisSlidingCounter(_RedisLimiter):
+class RedisSlidingCounter(_RedisWindowed):
     """Sliding window counter: two counts per key, see ``algorithms/sliding_counter.py``."""
 
     script_name = "sliding_counter"
     key_tag = "sc"
 
-    def __init__(
-        self,
-        client: redis.Redis,
-        limit: int,
-        window: float,
-        *,
-        prefix: str = "rl",
-        now_ms: NowMs | None = None,
-        breaker: CircuitBreaker | None = None,
-    ) -> None:
-        if window <= 0:
-            raise ValueError("window must be > 0 seconds")
-        super().__init__(client, limit, prefix=prefix, now_ms=now_ms, breaker=breaker)
-        self._window_ms = window * 1000
 
-    def hit(self, key: str, cost: int = 1) -> Decision:
+def hit_many(checks: Sequence[tuple[RateLimiter, str, int]]) -> list[Decision]:
+    """Check several (limiter, key, cost) in one Redis round trip, all or nothing.
+
+    Stops at the first check that blocks and returns the decisions up to and including
+    it. Nothing is spent from any key unless every check allowed. All limiters must be
+    the same algorithm on the same Redis client.
+
+    On Redis Cluster this only works if every key hashes to the same slot, which
+    different users' and IPs' keys won't, so keep it off there.
+    """
+    if not checks:
+        return []
+    first = checks[0][0]
+    if not isinstance(first, _RedisLimiter):
+        raise TypeError("hit_many needs Redis limiters")
+    limiters: list[_RedisLimiter] = []
+    for limiter, _, cost in checks:
+        if type(limiter) is not type(first) or limiter._client is not first._client:
+            raise TypeError("hit_many needs one algorithm on one Redis client")
         validate_cost(cost)
-        return self._run(key, [self._limit, repr(self._window_ms), cost, self._now_arg()])
+        limiters.append(limiter)
+    keys = [limiter.redis_key(key) for limiter, (_, key, _) in zip(limiters, checks, strict=True)]
+    args: list[Any] = [first._now_arg()]
+    for limiter, (_, _, cost) in zip(limiters, checks, strict=True):
+        args.extend(limiter._key_args(cost))
+    reply = first._call(lambda: first._multi_script(keys=keys, args=args))
+    return [limiters[i]._decode(reply[i * 4 : i * 4 + 4]) for i in range(len(reply) // 4)]
 
 
 def build_redis_limiter(
