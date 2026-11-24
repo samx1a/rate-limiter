@@ -63,8 +63,11 @@ its own limit check and send it back in a `Server-Timing` header. Over 40 reques
 The 45 ms one was probably a request that had to open a new connection to Redis (with
 a TLS handshake); the rest reused an open one.
 
-I also sent 20 requests at the same moment as one user. Exactly 10 got through and 10
-got 429, even though Vercel can spread requests over more than one server instance.
+I also sent 20 requests at the same moment as one user, a couple of times. One run let
+10 through and the other let 11 through, and the rest got 429, even though Vercel can
+spread requests over more than one server instance. The bucket holds 10, and when the
+20 requests take a bit over a second to all land, 1 more token refills in that time, so
+11 is correct too.
 
 ## Running them yourself
 

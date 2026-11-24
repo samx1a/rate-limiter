@@ -136,9 +136,12 @@ checked).
   | Redis, 4 processes, 1,000 users | 2,490 | 0 | 29,000 / 30,000 |
   | Live site, 10 clients | 32.5 | 0 | 79 / 80 |
 
-- **Live:** 20 requests sent at the same moment as one user get exactly 10 through and
-  10 blocked. Inside the server, the limit check (two Redis calls) takes about 3 ms
-  (it reports this in a `Server-Timing` header).
+- **Live:** 20 requests sent at the same moment as one user get 10 or 11 through and
+  the rest blocked. 10 is the bucket size; the 11th happens when the requests take
+  more than a second to all arrive, because the bucket refills 1 token per second in
+  the meantime. That's the limiter working, not leaking. Inside the server, the limit
+  check (two Redis calls) takes about 3 ms (it reports this in a `Server-Timing`
+  header).
 
 ## Running it
 
