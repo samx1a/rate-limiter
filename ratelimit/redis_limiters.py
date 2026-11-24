@@ -26,10 +26,17 @@ NowMs = Callable[[], float]
 R = TypeVar("R")
 
 
-def load_script(client: redis.Redis, name: str) -> Any:
-    source = resources.files("ratelimit.lua").joinpath(f"{name}.lua").read_text()
+def script_source(algorithm: str, driver: str = "single") -> str:
+    """One Lua script: the shared prelude, one algorithm's ``decide()``, and a driver
+    (``single`` checks one key, ``multi`` checks several, all or nothing)."""
+    lua = resources.files("ratelimit.lua")
+    parts = ("_prelude.lua", f"{algorithm}.lua", f"_{driver}.lua")
+    return "\n".join(lua.joinpath(part).read_text() for part in parts)
+
+
+def load_script(client: redis.Redis, algorithm: str, driver: str = "single") -> Any:
     # register_script runs via EVALSHA and reloads the script if Redis lost it (NOSCRIPT).
-    return client.register_script(source)
+    return client.register_script(script_source(algorithm, driver))
 
 
 def _ms_to_s(value: Any) -> float:
