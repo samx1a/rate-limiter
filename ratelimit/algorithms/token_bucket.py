@@ -20,57 +20,43 @@ a request is not blocked by rounding error.
 from __future__ import annotations
 
 import math
-import threading
 
-from ratelimit.clock import Clock, MonotonicClock
-from ratelimit.decision import Decision, validate_cost
+from ratelimit.algorithms.base import InMemoryLimiter
+from ratelimit.clock import Clock
+from ratelimit.decision import Decision
 
 EPSILON = 1e-9
 
 
-class TokenBucket:
+class TokenBucket(InMemoryLimiter[tuple[float, float]]):
+    """key -> (tokens, time of the last refill)."""
+
     def __init__(self, capacity: int, refill_rate: float, clock: Clock | None = None) -> None:
-        if capacity < 1:
-            raise ValueError("capacity must be >= 1")
+        super().__init__(capacity, clock)
         if refill_rate <= 0:
             raise ValueError("refill_rate must be > 0 tokens per second")
-        self._capacity = capacity
         self._rate = refill_rate
-        self._clock = clock or MonotonicClock()
-        self._buckets: dict[str, tuple[float, float]] = {}  # key -> (tokens, last refill)
-        # One lock guards the whole read-decide-write in hit(). The clock is read
-        # inside the lock, so state is always updated in time order.
-        self._lock = threading.Lock()
-
-    @property
-    def limit(self) -> int:
-        return self._capacity
 
     @property
     def refill_rate(self) -> float:
         return self._rate
 
-    def hit(self, key: str, cost: int = 1) -> Decision:
-        validate_cost(cost)
-        with self._lock:
-            return self._hit(key, cost)
-
     def _hit(self, key: str, cost: int) -> Decision:
         now = self._clock.now()
-        tokens, last = self._buckets.get(key, (float(self._capacity), now))
+        tokens, last = self._state.get(key, (float(self._limit), now))
 
         # Lazy refill: credit the time since the last hit, capped at capacity.
         elapsed = max(0.0, now - last)
-        tokens = min(float(self._capacity), tokens + elapsed * self._rate)
+        tokens = min(float(self._limit), tokens + elapsed * self._rate)
 
         allowed = tokens + EPSILON >= cost
         if allowed:
             tokens = max(0.0, tokens - cost)
-        self._buckets[key] = (tokens, now)
+        self._state[key] = (tokens, now)
 
         remaining = math.floor(tokens + EPSILON)
-        reset_after = (self._capacity - tokens) / self._rate
+        reset_after = (self._limit - tokens) / self._rate
         if allowed:
-            return Decision(True, self._capacity, remaining, reset_after)
-        retry_after = math.inf if cost > self._capacity else (cost - tokens) / self._rate
-        return Decision(False, self._capacity, remaining, reset_after, retry_after=retry_after)
+            return Decision(True, self._limit, remaining, reset_after)
+        retry_after = math.inf if cost > self._limit else (cost - tokens) / self._rate
+        return Decision(False, self._limit, remaining, reset_after, retry_after=retry_after)

@@ -21,60 +21,45 @@ limits (say 100k/hour per key) the counter is the better choice.
 from __future__ import annotations
 
 import math
-import threading
 from collections import deque
+from dataclasses import dataclass, field
 
-from ratelimit.clock import Clock, MonotonicClock
-from ratelimit.decision import Decision, validate_cost
+from ratelimit.algorithms.base import WindowedLimiter
+from ratelimit.decision import Decision
 
 
-class SlidingWindowLog:
-    def __init__(self, limit: int, window: float, clock: Clock | None = None) -> None:
-        if limit < 1:
-            raise ValueError("limit must be >= 1")
-        if window <= 0:
-            raise ValueError("window must be > 0 seconds")
-        self._limit = limit
-        self._window = window
-        self._clock = clock or MonotonicClock()
-        self._logs: dict[str, deque[tuple[float, int]]] = {}
-        self._totals: dict[str, int] = {}
-        # One lock guards the whole read-decide-write in hit(). The clock is read
-        # inside the lock, so state is always updated in time order.
-        self._lock = threading.Lock()
+@dataclass(slots=True)
+class _Log:
+    entries: deque[tuple[float, int]] = field(default_factory=deque)  # (time, cost)
+    total: int = 0  # sum of the costs in ``entries``
 
-    @property
-    def limit(self) -> int:
-        return self._limit
 
-    def hit(self, key: str, cost: int = 1) -> Decision:
-        validate_cost(cost)
-        with self._lock:
-            return self._hit(key, cost)
+class SlidingWindowLog(WindowedLimiter[_Log]):
+    """key -> log of admitted requests in the last window, oldest first."""
 
     def _hit(self, key: str, cost: int) -> Decision:
         now = self._clock.now()
-        log = self._logs.setdefault(key, deque())
-        total = self._totals.get(key, 0)
+        state = self._state.get(key)
+        if state is None:
+            state = self._state[key] = _Log()
+        log = state.entries
 
         # Drop entries that have slid out of the window: [now - window, now).
         while log and log[0][0] + self._window <= now:
-            total -= log.popleft()[1]
+            state.total -= log.popleft()[1]
 
-        if total + cost > self._limit:
-            self._totals[key] = total
+        if state.total + cost > self._limit:
             return Decision(
                 False,
                 self._limit,
-                self._limit - total,
+                self._limit - state.total,
                 self._reset_after(log, now),
-                retry_after=self._retry_after(log, now, total + cost - self._limit, cost),
+                retry_after=self._retry_after(log, now, state.total + cost - self._limit, cost),
             )
 
         log.append((now, cost))
-        total += cost
-        self._totals[key] = total
-        return Decision(True, self._limit, self._limit - total, self._reset_after(log, now))
+        state.total += cost
+        return Decision(True, self._limit, self._limit - state.total, self._reset_after(log, now))
 
     def _reset_after(self, log: deque[tuple[float, int]], now: float) -> float:
         """Time until every entry has expired, i.e. the full limit is back."""

@@ -73,4 +73,4 @@ def test_memory_per_key_is_bounded_by_limit() -> None:
     for _ in range(1000):
         limiter.hit("k")
         clock.advance(0.001)
-    assert len(limiter._logs["k"]) <= 5
+    assert len(limiter._state["k"].entries) <= 5

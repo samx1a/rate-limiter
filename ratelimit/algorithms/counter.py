@@ -7,38 +7,25 @@ one-off quotas such as "3 free trials"). Every other limiter adds time to this i
 
 from __future__ import annotations
 
-import threading
+from ratelimit.algorithms.base import InMemoryLimiter
+from ratelimit.decision import INF, Decision
 
-from ratelimit.decision import INF, Decision, validate_cost
 
+class NaiveCounter(InMemoryLimiter[int]):
+    """key -> requests admitted so far."""
 
-class NaiveCounter:
     def __init__(self, limit: int) -> None:
-        if limit < 1:
-            raise ValueError("limit must be >= 1")
-        self._limit = limit
-        self._counts: dict[str, int] = {}
-        # One lock guards the whole read-decide-write in hit().
-        self._lock = threading.Lock()
-
-    @property
-    def limit(self) -> int:
-        return self._limit
-
-    def hit(self, key: str, cost: int = 1) -> Decision:
-        validate_cost(cost)
-        with self._lock:
-            return self._hit(key, cost)
+        super().__init__(limit)
 
     def _hit(self, key: str, cost: int) -> Decision:
-        used = self._counts.get(key, 0)
+        used = self._state.get(key, 0)
         if used + cost > self._limit:
             # Blocked requests are not counted.
             return Decision(False, self._limit, self._limit - used, INF, retry_after=INF)
         used += cost
-        self._counts[key] = used
+        self._state[key] = used
         return Decision(True, self._limit, self._limit - used, INF)
 
     def reset(self, key: str) -> None:
         with self._lock:
-            self._counts.pop(key, None)
+            self._state.pop(key, None)
