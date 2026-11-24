@@ -66,6 +66,18 @@ turned down to 1 microsecond so they interleave as much as possible. Exactly the
 gets through every time. I also swapped the lock for a no-op to make sure the tests can
 actually catch a race: 4 or 5 of them fail on every run without it.
 
+## Forgetting idle keys
+
+At first the in-memory limiters remembered every key they'd ever seen, so one request
+from each of a million IPs meant a million entries that never went away. Now each
+algorithm knows when a key's state is the same as having no state at all (token bucket
+refilled to full, window over, log empty), and those get swept out.
+
+There's no background thread for this either. The sweep runs inside `hit()` whenever
+the map has doubled in size since the last sweep, the same trick a growable array
+uses, so the cost averages out to O(1) per request. A test pushes 100,000 one-off
+clients through and the map never goes past about 2,000 keys.
+
 ## The Redis part
 
 With more than one server, each one keeping its own count in memory doesn't work. If
@@ -185,6 +197,3 @@ REDIS_URL=redis://127.0.0.1:6399/0 uv run pytest
 - **Hot keys.** One very busy key always lands on one Redis shard. Past that point you'd
   want a small local allowance per server that syncs with Redis now and then, which
   trades a bit of accuracy for far fewer calls.
-- **The in-memory version never forgets idle keys.** Fine for a demo, but a long running
-  process would need a sweep or an LRU cap. The Redis version already handles this with
-  expiries.

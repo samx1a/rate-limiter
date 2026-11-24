@@ -3,7 +3,7 @@
 import pytest
 
 from ratelimit import FakeClock
-from ratelimit.algorithms.base import InMemoryLimiter
+from ratelimit.algorithms.base import MIN_SWEEP_SIZE, InMemoryLimiter
 from ratelimit.algorithms.counter import NaiveCounter
 from ratelimit.algorithms.fixed_window import FixedWindow
 from ratelimit.algorithms.sliding_counter import SlidingWindowCounter
@@ -83,3 +83,34 @@ def test_sweeping_never_changes_a_decision(name: str) -> None:
                 assert plain.hit(key, cost) == swept.hit(key, cost), (name, step, key)
         dropped += swept.sweep()
     assert dropped > 0  # otherwise this test proves nothing
+
+
+@pytest.mark.parametrize("name", ALL)
+def test_memory_stays_bounded_without_calling_sweep(name: str) -> None:
+    """100k one-off clients over ~3 hours. Only the last window's worth are live."""
+    clock = FakeClock()
+    limiter: InMemoryLimiter[object] = ALL[name](clock)
+    peak = 0
+    for n in range(100_000):
+        clock.set(n * 0.1)  # 10 new clients per second
+        limiter.hit(f"ip-{n}")
+        peak = max(peak, len(limiter))
+    # ~100-200 keys are live at any moment; the map may grow to 2x before a sweep.
+    assert peak <= 2 * MIN_SWEEP_SIZE
+
+
+def test_a_busy_map_is_not_swept_on_every_hit() -> None:
+    clock = FakeClock()
+    limiter = FixedWindow(3, 1e9, clock)  # nothing ever goes idle
+    sweeps = 0
+    original = limiter._sweep
+
+    def counting_sweep() -> int:
+        nonlocal sweeps
+        sweeps += 1
+        return original()
+
+    limiter._sweep = counting_sweep  # type: ignore[method-assign]
+    for n in range(20_000):
+        limiter.hit(f"k{n}")
+    assert sweeps <= 5  # at 1024, 2048, 4096, 8192, 16384 keys
