@@ -73,12 +73,13 @@
 
   <section aria-labelledby="try-title">
     <h2 id="try-title">Try it</h2>
-    <p class="muted">You are user <span class="mono" id="who"></span>. Send requests to <span class="mono">GET /api/hello</span> and watch the limit.</p>
+    <p class="muted">You are user <span class="mono" id="who"></span>. Send requests to <span class="mono">GET /api/hello</span> and watch the limit. <span class="mono">/api/report</span> counts as 5 requests at once.</p>
     <div class="row">
       <label class="muted" for="user">User id</label>
       <input id="user" autocomplete="off" spellcheck="false" maxlength="64">
       <button class="primary" id="one">Send 1 request</button>
       <button id="burst">Burst 15</button>
+      <button id="report">Report (costs 5)</button>
       <button id="clear">Clear log</button>
     </div>
     <div class="meter">
@@ -89,7 +90,7 @@
     </div>
     <div class="log" role="log" aria-live="polite">
       <table>
-        <thead><tr><th>#</th><th>Status</th><th>Remaining</th><th>Reset</th><th>Retry-After</th><th>Time</th></tr></thead>
+        <thead><tr><th>#</th><th>Status</th><th>Remaining</th><th>Reset</th><th>Retry-After</th><th>Time</th><th title="How long the limit check took inside the server (Server-Timing)">Check</th></tr></thead>
         <tbody id="log"></tbody>
       </table>
     </div>
@@ -156,10 +157,10 @@
     return td;
   }
 
-  async function send() {
+  async function send(path = "/api/hello") {
     const started = performance.now();
     let res;
-    try { res = await fetch("/api/hello", { headers: { "X-User-Id": user }, cache: "no-store" }); }
+    try { res = await fetch(path, { headers: { "X-User-Id": user }, cache: "no-store" }); }
     catch { return; }
     const ms = Math.round(performance.now() - started);
     const h = (k) => res.headers.get(k);
@@ -176,21 +177,25 @@
     $("counts").textContent = state.ok + " / " + state.blocked;
 
     const tr = document.createElement("tr");
-    tr.append(cell(String(state.n)),
+    // Server-Timing: ratelimit;dur=0.98 -> "0.98 ms"
+    const check = /ratelimit;dur=([\d.]+)/.exec(h("Server-Timing") || "");
+    tr.append(cell(state.n + (path === "/api/hello" ? "" : " ×5")),
       cell(String(res.status), "code " + (res.ok ? "ok" : "no")),
       cell(h("RateLimit-Remaining") ?? "–"), cell(h("RateLimit-Reset") ?? "–"),
-      cell(h("Retry-After") ? h("Retry-After") + " s" : "–"), cell(ms + " ms"));
+      cell(h("Retry-After") ? h("Retry-After") + " s" : "–"), cell(ms + " ms"),
+      cell(check ? check[1] + " ms" : "–"));
     $("log").prepend(tr);
   }
 
-  const buttons = [$("one"), $("burst")];
-  async function run(count) {
+  const buttons = [$("one"), $("burst"), $("report")];
+  async function run(count, path) {
     buttons.forEach((b) => (b.disabled = true));
-    try { for (let i = 0; i < count; i++) await send(); }
+    try { for (let i = 0; i < count; i++) await send(path); }
     finally { buttons.forEach((b) => (b.disabled = false)); }
   }
   $("one").addEventListener("click", () => run(1));
   $("burst").addEventListener("click", () => run(15));
+  $("report").addEventListener("click", () => run(1, "/api/report"));
   $("clear").addEventListener("click", () => {
     $("log").textContent = ""; state.n = state.ok = state.blocked = 0; $("counts").textContent = "0 / 0";
   });
