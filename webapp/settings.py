@@ -44,6 +44,10 @@ class Settings:
     # Check the IP and user limits in one Redis round trip, all or nothing. Turn off on
     # Redis Cluster, where the two keys usually live on different nodes.
     redis_batch: bool = True
+    # Circuit breaker: stop calling Redis after this many failures in a row, then try
+    # one request every breaker_cooldown seconds.
+    breaker_threshold: int = 3
+    breaker_cooldown: float = 5.0
     # Per-command Redis timeout. Keep it short in production (same region as Redis);
     # raise it when Redis is far away, e.g. running tests against a cloud database.
     redis_timeout: float = 0.25
@@ -66,6 +70,8 @@ class Settings:
             raise ValueError("the naive counter has no Redis version")
         if self.redis_timeout <= 0:
             raise ValueError("redis_timeout must be > 0 seconds")
+        if self.breaker_threshold < 1 or self.breaker_cooldown <= 0:
+            raise ValueError("breaker_threshold must be >= 1 and breaker_cooldown > 0")
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -96,6 +102,10 @@ class Settings:
                 key_prefix=read("RATE_LIMIT_PREFIX", str, defaults.key_prefix),
                 redis_timeout=read("REDIS_TIMEOUT_MS", _millis, defaults.redis_timeout),
                 redis_batch=read("REDIS_BATCH", _flag, defaults.redis_batch),
+                breaker_threshold=read(
+                    "BREAKER_THRESHOLD", _positive_int, defaults.breaker_threshold
+                ),
+                breaker_cooldown=read("BREAKER_COOLDOWN_MS", _millis, defaults.breaker_cooldown),
                 algorithm=read("RATE_LIMIT_ALGORITHM", _choice(Algorithm), defaults.algorithm),
                 ip_limit=read("IP_LIMIT", parse_limit, defaults.ip_limit),
                 user_limit=read("USER_LIMIT", parse_limit, defaults.user_limit),
@@ -128,6 +138,16 @@ def _networks(value: str) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network
         return tuple(ipaddress.ip_network(part) for part in parts)
     except ValueError as exc:
         raise ValueError(f"expected IPs or CIDR ranges ({exc})") from None
+
+
+def _positive_int(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError:
+        raise ValueError("expected a whole number") from None
+    if number < 1:
+        raise ValueError("must be >= 1")
+    return number
 
 
 def _millis(value: str) -> float:

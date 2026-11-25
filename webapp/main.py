@@ -116,7 +116,7 @@ def build_service(settings: Settings, client: redis.Redis | None = None) -> Rate
         assert client is not None
         # One breaker for the one Redis: if it's down for the IP check, it's down for
         # the user check too.
-        breaker = CircuitBreaker()
+        breaker = CircuitBreaker(settings.breaker_threshold, settings.breaker_cooldown)
 
         def make(spec: LimitSpec) -> RateLimiter:
             return build_redis_limiter(

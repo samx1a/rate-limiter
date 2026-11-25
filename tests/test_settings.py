@@ -14,6 +14,8 @@ def test_every_variable_is_read() -> None:
             "RATE_LIMIT_PREFIX": "app",
             "REDIS_TIMEOUT_MS": "500",
             "REDIS_BATCH": "off",
+            "BREAKER_THRESHOLD": "5",
+            "BREAKER_COOLDOWN_MS": "2000",
             "RATE_LIMIT_ALGORITHM": "fixed_window",
             "IP_LIMIT": "100/1m",
             "USER_LIMIT": "5/s",
@@ -28,6 +30,8 @@ def test_every_variable_is_read() -> None:
         key_prefix="app",
         redis_timeout=0.5,
         redis_batch=False,
+        breaker_threshold=5,
+        breaker_cooldown=2.0,
         algorithm=Algorithm.FIXED_WINDOW,
         ip_limit=LimitSpec(100, 60),
         user_limit=LimitSpec(5, 1),
@@ -47,6 +51,9 @@ def test_every_variable_is_read() -> None:
         ("IP_LIMIT", "lots", "bad limit"),
         ("USER_LIMIT", "0/s", "at least 1 request"),
         ("FAIL_OPEN", "maybe", "expected true or false"),
+        ("BREAKER_THRESHOLD", "0", "must be >= 1"),
+        ("BREAKER_THRESHOLD", "three", "expected a whole number"),
+        ("BREAKER_COOLDOWN_MS", "-5", "must be > 0"),
     ],
 )
 def test_bad_values_name_the_variable(name: str, value: str, message: str) -> None:
