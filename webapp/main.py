@@ -6,6 +6,7 @@ runtime, and string annotations cannot see aliases defined inside ``create_app``
 
 import base64
 import hashlib
+import logging
 import re
 import time
 from collections.abc import AsyncIterator, Callable
@@ -32,6 +33,8 @@ from webapp.identity import (
 )
 from webapp.settings import Backend, Settings
 from webapp.simulate import Scenario, simulate
+
+log = logging.getLogger(__name__)
 
 EXPENSIVE_WEIGHT = 5
 
@@ -146,6 +149,24 @@ def build_service(settings: Settings, client: redis.Redis | None = None) -> Rate
     )
 
 
+def warn_about_unreachable_weights(service: RateLimitService, weights: dict[str, int]) -> None:
+    """A route that costs more than a limit's burst size can never succeed: it gets a
+    429 with no Retry-After forever. That's almost always a config mistake (say
+    USER_LIMIT=3/s with a route that costs 5), so say so at startup."""
+    for route, weight in weights.items():
+        for policy in service.policies:
+            cost = policy.cost * weight
+            if cost > policy.limiter.limit:
+                log.warning(
+                    "%s costs %d but the %r limit only allows bursts of %d, "
+                    "so it will always get a 429",
+                    route,
+                    cost,
+                    policy.name,
+                    policy.limiter.limit,
+                )
+
+
 def create_app(
     settings: Settings | None = None, service: RateLimitService | None = None
 ) -> FastAPI:
@@ -154,6 +175,8 @@ def create_app(
     if service is None:
         client = redis_client(settings)
         service = build_service(settings, client)
+
+    warn_about_unreachable_weights(service, {"/api/report": EXPENSIVE_WEIGHT})
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

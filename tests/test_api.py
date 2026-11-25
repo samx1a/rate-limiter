@@ -1,5 +1,7 @@
 import ipaddress
+import logging
 
+import pytest
 from fastapi.testclient import TestClient
 
 from ratelimit.limits import LimitSpec
@@ -140,3 +142,16 @@ def test_hello_shows_the_real_ipv6_address_and_the_network_it_is_limited_as() ->
     body = client().get("/api/hello", headers={"x-real-ip": "2001:db8:1:2::abcd"}).json()
     assert body["ip"] == "2001:db8:1:2::abcd"
     assert body["limited_as"] == "2001:db8:1:2::/64"
+
+
+def test_warns_when_a_route_can_never_fit_a_limit(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING, logger="webapp.main"):
+        client(user_limit=3)
+    assert any(
+        "/api/report costs 5 but the 'user' limit only allows bursts of 3" in r.getMessage()
+        for r in caplog.records
+    )
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="webapp.main"):
+        client(user_limit=10)
+    assert not caplog.records
