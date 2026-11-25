@@ -18,7 +18,7 @@ import redis
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
-from ratelimit.breaker import CircuitBreaker
+from ratelimit.breaker import BreakerState, CircuitBreaker
 from ratelimit.decision import LimiterUnavailable, RateLimiter
 from ratelimit.limits import LimitSpec, build_limiter
 from ratelimit.redis_limiters import build_redis_limiter, connect, hit_many
@@ -107,7 +107,11 @@ def redis_client(settings: Settings) -> redis.Redis | None:
     return connect(settings.redis_url, timeout=settings.redis_timeout)
 
 
-def build_service(settings: Settings, client: redis.Redis | None = None) -> RateLimitService:
+def build_service(
+    settings: Settings,
+    client: redis.Redis | None = None,
+    breaker: CircuitBreaker | None = None,
+) -> RateLimitService:
     def local(spec: LimitSpec) -> RateLimiter:
         return build_limiter(settings.algorithm, spec)
 
@@ -116,7 +120,7 @@ def build_service(settings: Settings, client: redis.Redis | None = None) -> Rate
         assert client is not None
         # One breaker for the one Redis: if it's down for the IP check, it's down for
         # the user check too.
-        breaker = CircuitBreaker(settings.breaker_threshold, settings.breaker_cooldown)
+        breaker = breaker or CircuitBreaker(settings.breaker_threshold, settings.breaker_cooldown)
 
         def make(spec: LimitSpec) -> RateLimiter:
             return build_redis_limiter(
@@ -172,9 +176,15 @@ def create_app(
 ) -> FastAPI:
     settings = settings or Settings.from_env()
     client = None
+    breaker = None
     if service is None:
         client = redis_client(settings)
-        service = build_service(settings, client)
+        if client is not None:
+            breaker = CircuitBreaker(settings.breaker_threshold, settings.breaker_cooldown)
+        service = build_service(settings, client, breaker)
+    if breaker is not None:
+        b = breaker
+        service.metrics.gauge("ratelimit_breaker_open", lambda: b.state is not BreakerState.CLOSED)
 
     warn_about_unreachable_weights(service, {"/api/report": EXPENSIVE_WEIGHT})
 
@@ -281,9 +291,17 @@ def create_app(
             client.ping()
         except (redis.ConnectionError, redis.TimeoutError) as exc:
             response.status_code = 503
-            return {"ok": False, "backend": "redis", "error": type(exc).__name__}
+            down: dict[str, Any] = {"ok": False, "backend": "redis", "error": type(exc).__name__}
+            if breaker is not None:
+                down["breaker"] = str(breaker.state)
+            return down
         ping_ms = round((time.perf_counter() - started) * 1000, 2)
-        return {"ok": True, "backend": "redis", "ping_ms": ping_ms}
+        body: dict[str, Any] = {"ok": True, "backend": "redis", "ping_ms": ping_ms}
+        if breaker is not None:
+            # Redis can answer this ping while the breaker is still open (it only tries
+            # again every cooldown), so show both.
+            body["breaker"] = str(breaker.state)
+        return body
 
     @app.get("/api/metrics", response_class=PlainTextResponse)
     def metrics() -> PlainTextResponse:

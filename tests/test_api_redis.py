@@ -43,6 +43,7 @@ def test_ready_pings_redis(redis_client: redis.Redis, prefix: str) -> None:
     body = TestClient(create_app(settings)).get("/api/ready").json()
     assert body["ok"] is True and body["backend"] == "redis"
     assert body["ping_ms"] >= 0
+    assert body["breaker"] == "closed"
 
 
 def test_shutdown_closes_the_redis_client(

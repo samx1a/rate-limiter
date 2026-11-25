@@ -57,3 +57,12 @@ def test_service_counts_outage_handling() -> None:
     svc.check(Identity(ip="1.2.3.4", user="alice"))
     assert svc.metrics.value("ratelimit_fallback_total", policy="ip") == 1
     assert svc.metrics.value("ratelimit_fail_open_total", policy="user") == 1
+
+
+def test_gauges_are_read_at_render_time() -> None:
+    m = Metrics()
+    value = [0.0]
+    m.gauge("thing_open", lambda: value[0])
+    assert "thing_open 0" in m.render()
+    value[0] = 1
+    assert "# TYPE thing_open gauge\nthing_open 1" in m.render()

@@ -15,6 +15,7 @@ from __future__ import annotations
 import bisect
 import threading
 from collections import Counter
+from collections.abc import Callable
 
 # Upper bounds in milliseconds. A limit check is a few ms with Redis close by;
 # anything past 250 ms means the store is timing out.
@@ -29,11 +30,17 @@ class Metrics:
         self._counters: Counter[tuple[str, Labels]] = Counter()
         self._buckets = [0] * (len(LATENCY_BUCKETS_MS) + 1)  # last one is +Inf
         self._latency_sum_ms = 0.0
+        self._gauges: dict[str, Callable[[], float]] = {}
 
     def inc(self, name: str, amount: int = 1, **labels: str) -> None:
         key = (name, tuple(sorted(labels.items())))
         with self._lock:
             self._counters[key] += amount
+
+    def gauge(self, name: str, read: Callable[[], float]) -> None:
+        """A value read fresh at render time, e.g. whether the breaker is open."""
+        with self._lock:
+            self._gauges[name] = read
 
     def observe_latency(self, ms: float) -> None:
         index = bisect.bisect_left(LATENCY_BUCKETS_MS, ms)
@@ -51,7 +58,11 @@ class Metrics:
             counters = sorted(self._counters.items())
             buckets = list(self._buckets)
             total_ms = self._latency_sum_ms
+            gauges = sorted(self._gauges.items())
         lines: list[str] = []
+        for name, read in gauges:
+            lines.append(f"# TYPE {name} gauge")
+            lines.append(f"{name} {read():g}")
         seen: set[str] = set()
         for (name, labels), count in counters:
             if name not in seen:

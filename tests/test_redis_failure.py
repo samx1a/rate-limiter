@@ -125,5 +125,18 @@ def test_ready_reports_503_while_health_stays_ok() -> None:
     c = TestClient(create_app(settings(fail_open=True)))
     ready = c.get("/api/ready")
     assert ready.status_code == 503
-    assert ready.json() == {"ok": False, "backend": "redis", "error": "ConnectionError"}
+    assert ready.json() == {
+        "ok": False,
+        "backend": "redis",
+        "error": "ConnectionError",
+        "breaker": "closed",
+    }
     assert c.get("/api/health").status_code == 200  # don't restart over a Redis outage
+
+
+def test_breaker_state_shows_up_in_ready_and_metrics() -> None:
+    c = TestClient(create_app(settings(fail_open=True, local_fallback=True)))
+    for _ in range(3):  # default threshold: 3 failures in a row
+        c.get("/api/hello")
+    assert c.get("/api/ready").json()["breaker"] == "open"
+    assert "ratelimit_breaker_open 1" in c.get("/api/metrics").text
