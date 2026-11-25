@@ -128,40 +128,52 @@ async def run(args: argparse.Namespace) -> Result:
     async with httpx.AsyncClient(limits=limits, timeout=timeout, http2=False) as client:
         started = time.perf_counter()
         deadline = started + args.duration
-        in_flight = asyncio.Semaphore(args.concurrency)
 
         async def send(n: int, scheduled: float) -> None:
-            """One request. Latency counts from ``scheduled``, so time spent waiting for
-            a free slot is included, as a real client would experience it."""
+            """One request. Latency counts from ``scheduled``: in open-loop mode that
+            includes time spent waiting for a free worker, as a real client would."""
             headers = {"x-user-id": f"{args.user_prefix}{n % args.users}"}
-            async with in_flight:
-                try:
-                    response = await client.get(args.url, headers=headers)
-                    statuses[str(response.status_code)] += 1
-                    latencies.append((time.perf_counter() - scheduled) * 1000)
-                    check = server_timing_ms(response.headers.get("server-timing"))
-                    if check is not None:
-                        checks.append(check)
-                except httpx.HTTPError as exc:
-                    transport[type(exc).__name__] += 1
+            try:
+                response = await client.get(args.url, headers=headers)
+                statuses[str(response.status_code)] += 1
+                latencies.append((time.perf_counter() - scheduled) * 1000)
+                check = server_timing_ms(response.headers.get("server-timing"))
+                if check is not None:
+                    checks.append(check)
+            except httpx.HTTPError as exc:
+                transport[type(exc).__name__] += 1
 
-        async def worker() -> None:
+        async def closed_worker() -> None:
             nonlocal counter
             while time.perf_counter() < deadline:
                 counter += 1
                 await send(counter, time.perf_counter())
 
-        if args.rate:
-            tasks = []
+        # Open loop: a scheduler drops (n, scheduled time) on a queue at the target
+        # rate and a fixed pool of workers sends them. Not one task per request: with a
+        # backlog that's thousands of tasks contending for a semaphore, and the load
+        # tool itself slows down exactly when the server does.
+        queue: asyncio.Queue[tuple[int, float] | None] = asyncio.Queue()
+
+        async def scheduler() -> None:
             for n in range(int(args.duration * args.rate)):
                 scheduled = started + n / args.rate
                 delay = scheduled - time.perf_counter()
                 if delay > 0:
                     await asyncio.sleep(delay)
-                tasks.append(asyncio.create_task(send(n, scheduled)))
-            await asyncio.gather(*tasks)
+                queue.put_nowait((n, scheduled))
+            for _ in range(args.concurrency):
+                queue.put_nowait(None)  # one stop signal per worker
+
+        async def open_worker() -> None:
+            while (item := await queue.get()) is not None:
+                await send(*item)
+
+        if args.rate:
+            workers = [open_worker() for _ in range(args.concurrency)]
+            await asyncio.gather(scheduler(), *workers)
         else:
-            await asyncio.gather(*(worker() for _ in range(args.concurrency)))
+            await asyncio.gather(*(closed_worker() for _ in range(args.concurrency)))
         elapsed = time.perf_counter() - started
 
     total = sum(statuses.values()) + sum(transport.values())
