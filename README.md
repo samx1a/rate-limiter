@@ -33,6 +33,9 @@ tests/               195 tests
 PROMPT.md            the spec and checklist I wrote before starting
 ```
 
+If you want the big picture first, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) follows
+one request through every layer and lists what happens when each piece fails.
+
 ## The fixed window edge problem
 
 Fixed window splits time into back-to-back windows and counts requests per window. The
