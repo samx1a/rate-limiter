@@ -153,6 +153,12 @@ retry-after: 1
 {"detail":{"error":"rate_limited","message":"Too many requests. Slow down and retry later.","policy":"user","retry_after":1}}
 ```
 
+[`examples/client.py`](examples/client.py) shows how a client should handle this:
+wait `Retry-After` seconds plus a bit of random jitter (so a crowd of blocked clients
+doesn't all come back in the same millisecond), and back off exponentially on network
+errors. Pointed at the demo it goes 10 requests straight through, then about one a
+second, without ever surfacing a 429.
+
 The `RateLimit-*` headers follow the IETF draft. They always describe whichever limit
 you're closest to hitting. Successful responses get them too, so a client can slow down
 before it gets blocked.
