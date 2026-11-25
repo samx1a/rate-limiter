@@ -3,8 +3,13 @@ name = "rate-limiter"
 version = "0.1.0"
 description = "Rate limiting from a naive counter to atomic Redis Lua scripts, served with FastAPI."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Samuel Xia" }]
 requires-python = ">=3.11"
+keywords = ["rate limiting", "token bucket", "sliding window", "redis", "fastapi"]
 classifiers = [
+    "Typing :: Typed",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -14,6 +19,10 @@ dependencies = [
     "fastapi>=0.115",
     "redis>=5.0.1",  # Redis.from_pool
 ]
+
+[project.urls]
+Homepage = "https://rate-limiter-lac.vercel.app"
+Source = "https://github.com/samx1a/rate-limiter"
 
 [project.optional-dependencies]
 # A server to run the app with. Vercel brings its own, so it isn't a core dependency.
