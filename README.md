@@ -28,6 +28,7 @@ ratelimit/
   service.py         applies a per-IP limit and a per-user limit to each request
 webapp/              FastAPI app, 429s + headers, the demo page
 loadtest/            load test tool (results in docs/LOAD_TEST.md)
+bench/               micro-benchmarks for one limit check (docs/BENCHMARKS.md)
 tests/               195 tests
 PROMPT.md            the spec and checklist I wrote before starting
 ```

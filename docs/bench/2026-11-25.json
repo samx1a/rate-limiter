@@ -1,0 +1,31 @@
+{
+  "machine": "Darwin arm64, Python 3.11.13",
+  "memory": {
+    "fixed_window": {
+      "one_hot_key_us": 0.644,
+      "100k_keys_us": 0.695
+    },
+    "sliding_window": {
+      "one_hot_key_us": 0.689,
+      "100k_keys_us": 0.816
+    },
+    "sliding_counter": {
+      "one_hot_key_us": 0.919,
+      "100k_keys_us": 0.959
+    },
+    "token_bucket": {
+      "one_hot_key_us": 0.877,
+      "100k_keys_us": 1.037
+    },
+    "counter": {
+      "one_hot_key_us": 0.573,
+      "100k_keys_us": 0.619
+    }
+  },
+  "redis": {
+    "ping_us": 58.718,
+    "one_key_us": 69.137,
+    "two_keys_one_by_one_us": 136.588,
+    "two_keys_batched_us": 78.158
+  }
+}
