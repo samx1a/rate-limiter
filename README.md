@@ -167,8 +167,8 @@ limiting each address on its own would let someone pick a fresh one for every re
 
 ## Does it actually work
 
-- **Tests:** 195 tests. CI runs them on Python 3.11, 3.12 and 3.13 against Redis 7, plus
-  Redis 6, along with ruff and mypy in strict mode. In CI the Redis tests fail instead of
+- **Tests:** CI runs them on Python 3.11 to 3.14 against Redis 7, plus Redis 6 and
+  Redis 8 (what the live site uses), along with ruff and mypy in strict mode. In CI the Redis tests fail instead of
   skipping if Redis isn't there, so they can't quietly not run.
 - **Same behavior on both backends:** `test_contract.py` runs one set of checks against
   every algorithm in memory and in Redis.

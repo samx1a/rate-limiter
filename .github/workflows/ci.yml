@@ -32,11 +32,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.11", "3.12", "3.13"]
+        python: ["3.11", "3.12", "3.13", "3.14"]
         redis: ["7"]
         include:
           - python: "3.12"
             redis: "6"
+          # The live site runs on Redis 8.
+          - python: "3.13"
+            redis: "8"
     services:
       redis:
         image: redis:${{ matrix.redis }}-alpine
