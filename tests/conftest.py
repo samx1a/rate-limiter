@@ -3,6 +3,11 @@
 Redis tests use ``REDIS_URL`` (default: redis://127.0.0.1:6379/15). If Redis is not
 reachable they are skipped locally, but with ``REQUIRE_REDIS=1`` (set in CI) they
 fail instead, so a misconfigured CI can never pass by silently skipping them.
+
+Tests only touch their own uniquely prefixed keys and clean them up, so pointing them
+at a Redis you use for other things is safe. The one exception is anything that
+affects the whole server (like flushing the script cache): that needs
+``REDIS_DISPOSABLE=1``, which says this Redis exists only for the tests (CI sets it).
 """
 
 from __future__ import annotations
@@ -38,3 +43,11 @@ def prefix(redis_client: redis.Redis) -> Iterator[str]:
     keys = list(redis_client.scan_iter(f"{value}:*"))
     if keys:
         redis_client.delete(*keys)
+
+
+@pytest.fixture
+def disposable_redis(redis_client: redis.Redis) -> redis.Redis:
+    """The Redis client, but only if it's OK to do server-wide things to it."""
+    if os.environ.get("REDIS_DISPOSABLE") != "1":
+        pytest.skip("touches the whole Redis server; set REDIS_DISPOSABLE=1 to allow")
+    return redis_client

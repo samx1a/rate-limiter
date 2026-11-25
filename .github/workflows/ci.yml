@@ -50,6 +50,8 @@ jobs:
       REDIS_URL: redis://localhost:6379/0
       # Redis tests must run in CI: fail (don't skip) if Redis is missing.
       REQUIRE_REDIS: "1"
+      # The service container exists only for these tests, so server-wide ones may run.
+      REDIS_DISPOSABLE: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6

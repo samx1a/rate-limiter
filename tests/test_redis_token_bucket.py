@@ -89,10 +89,10 @@ def test_uses_the_redis_server_clock_by_default(redis_client: redis.Redis, prefi
     assert [bucket.hit("k").allowed for _ in range(3)] == [True, True, False]
 
 
-def test_survives_a_script_cache_flush(redis_client: redis.Redis, prefix: str) -> None:
-    bucket, _ = make(redis_client, prefix, capacity=2)
+def test_survives_a_script_cache_flush(disposable_redis: redis.Redis, prefix: str) -> None:
+    bucket, _ = make(disposable_redis, prefix, capacity=2)
     bucket.hit("k")
-    redis_client.script_flush()  # e.g. a Redis restart or failover
+    disposable_redis.script_flush()  # e.g. a Redis restart or failover
     assert bucket.hit("k").allowed
 
 
