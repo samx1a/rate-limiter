@@ -56,4 +56,4 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: uv sync --locked --extra dev
-      - run: uv run pytest -v
+      - run: uv run pytest -v --cov --cov-report=term

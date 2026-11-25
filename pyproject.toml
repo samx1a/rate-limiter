@@ -15,6 +15,7 @@ dev = [
     "hypothesis>=6.100",
     "mypy>=1.10",
     "pytest>=8.0",
+    "pytest-cov>=5.0",
     "ruff>=0.5",
     "uvicorn[standard]>=0.30",
 ]
@@ -46,3 +47,14 @@ packages = ["ratelimit", "webapp", "loadtest"]
 
 [tool.vercel]
 entrypoint = "webapp.main:app"
+
+[tool.coverage.run]
+branch = true
+source = ["ratelimit", "webapp", "loadtest"]
+
+[tool.coverage.report]
+# 94% when this was added. The floor is there to catch a big untested chunk landing,
+# not to chase 100%.
+fail_under = 90
+show_missing = true
+skip_covered = true
