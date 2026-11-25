@@ -81,3 +81,19 @@ jobs:
           PYTHONPATH=. .venv/bin/python -m pytest -v
           tests/test_thread_safety.py tests/test_breaker.py tests/test_sweep.py
           tests/test_properties.py
+
+  docker:
+    name: Docker image builds and serves
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t rate-limiter .
+      - name: Start it and hit the API
+        run: |
+          docker run -d --name app -p 8000:8000 rate-limiter
+          for i in $(seq 1 30); do curl -fs localhost:8000/api/health && break; sleep 1; done
+          curl -fs localhost:8000/api/info
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'x-user-id: ci' localhost:8000/api/hello)" = 200
+          docker exec app id -u | grep -qx 10001  # not running as root
+      - if: failure()
+        run: docker logs app

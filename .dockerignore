@@ -1,0 +1,14 @@
+.venv
+.git
+.github
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.hypothesis
+.coverage
+.vercel
+.env*
+**/__pycache__
+tests
+docs
+loadtest
