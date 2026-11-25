@@ -1,9 +1,20 @@
-"""Closed-loop HTTP load test for the rate limiter.
+"""HTTP load test for the rate limiter.
 
-``--concurrency`` workers each send a request, wait for the answer, and immediately
-send the next, for ``--duration`` seconds. Requests rotate through ``--users`` user ids
-(``X-User-Id``). Prints throughput, status counts, errors and latency, and checks that
-the server never admitted more than the configured limit allows.
+Two modes:
+
+- **closed loop** (default): ``--concurrency`` workers each send a request, wait for
+  the answer, and immediately send the next, for ``--duration`` seconds. Good for
+  "how many requests per second can this take".
+- **open loop** (``--rate N``): send N requests per second on a fixed schedule no
+  matter how fast answers come back, with up to ``--concurrency`` in flight. Latency
+  is measured from when each request *should* have been sent. A closed loop hides a
+  slow server, because the workers slow down with it and stop sending (so-called
+  coordinated omission); an open loop keeps the pressure on and the queueing delay
+  shows up in the percentiles.
+
+Requests rotate through ``--users`` user ids (``X-User-Id``). Prints throughput,
+status counts, errors and latency, and checks that the server never admitted more
+than the configured limit allows.
 
 Example:
     python -m loadtest.loadtest --url http://127.0.0.1:8000/api/hello \\
@@ -38,6 +49,8 @@ class Result:
     duration_s: float
     concurrency: int
     users: int
+    mode: str = "closed"
+    target_rate: float | None = None
     requests: int = 0
     statuses: dict[str, int] = field(default_factory=dict)
     transport_errors: dict[str, int] = field(default_factory=dict)
@@ -82,21 +95,37 @@ async def run(args: argparse.Namespace) -> Result:
     async with httpx.AsyncClient(limits=limits, timeout=timeout, http2=False) as client:
         started = time.perf_counter()
         deadline = started + args.duration
+        in_flight = asyncio.Semaphore(args.concurrency)
+
+        async def send(n: int, scheduled: float) -> None:
+            """One request. Latency counts from ``scheduled``, so time spent waiting for
+            a free slot is included, as a real client would experience it."""
+            headers = {"x-user-id": f"{args.user_prefix}{n % args.users}"}
+            async with in_flight:
+                try:
+                    response = await client.get(args.url, headers=headers)
+                    statuses[str(response.status_code)] += 1
+                    latencies.append((time.perf_counter() - scheduled) * 1000)
+                except httpx.HTTPError as exc:
+                    transport[type(exc).__name__] += 1
 
         async def worker() -> None:
             nonlocal counter
             while time.perf_counter() < deadline:
                 counter += 1
-                headers = {"x-user-id": f"{args.user_prefix}{counter % args.users}"}
-                sent = time.perf_counter()
-                try:
-                    response = await client.get(args.url, headers=headers)
-                    statuses[str(response.status_code)] += 1
-                    latencies.append((time.perf_counter() - sent) * 1000)
-                except httpx.HTTPError as exc:
-                    transport[type(exc).__name__] += 1
+                await send(counter, time.perf_counter())
 
-        await asyncio.gather(*(worker() for _ in range(args.concurrency)))
+        if args.rate:
+            tasks = []
+            for n in range(int(args.duration * args.rate)):
+                scheduled = started + n / args.rate
+                delay = scheduled - time.perf_counter()
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                tasks.append(asyncio.create_task(send(n, scheduled)))
+            await asyncio.gather(*tasks)
+        else:
+            await asyncio.gather(*(worker() for _ in range(args.concurrency)))
         elapsed = time.perf_counter() - started
 
     latencies.sort()
@@ -106,6 +135,8 @@ async def run(args: argparse.Namespace) -> Result:
         duration_s=round(elapsed, 2),
         concurrency=args.concurrency,
         users=args.users,
+        mode="open" if args.rate else "closed",
+        target_rate=args.rate,
         requests=total,
         statuses=dict(sorted(statuses.items())),
         transport_errors=dict(transport),
@@ -131,11 +162,19 @@ async def run(args: argparse.Namespace) -> Result:
     return result
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--url", required=True)
     parser.add_argument("--duration", type=float, default=20)
-    parser.add_argument("--concurrency", type=int, default=50)
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=50,
+        help="closed loop: number of workers; open loop: most requests in flight",
+    )
+    parser.add_argument(
+        "--rate", type=float, help="open loop: send this many requests per second on a schedule"
+    )
     parser.add_argument("--users", type=int, default=100)
     parser.add_argument("--user-prefix", default="lt-")
     parser.add_argument("--timeout", type=float, default=10)
@@ -148,7 +187,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--algorithm", default="token_bucket", choices=[a.value for a in Algorithm])
     parser.add_argument("--json", help="also write the result to this file")
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    if args.rate is not None and args.rate <= 0:
+        raise SystemExit("--rate must be > 0")
 
     result = asyncio.run(run(args))
     print(json.dumps(asdict(result), indent=2))
