@@ -62,3 +62,22 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: uv sync --locked --extra dev
       - run: uv run pytest -v --cov --cov-report=term
+
+  free-threaded:
+    # Python without the GIL: threads really run at the same time, so a missing lock
+    # shows up far more often. Only the in-memory, thread-heavy tests run here (the
+    # web stack's compiled dependencies don't all ship free-threaded builds yet).
+    name: Thread safety (Python 3.14t, no GIL)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.14t"
+      - run: uv venv --python 3.14t
+      - run: uv pip install pytest hypothesis redis
+      - run: .venv/bin/python -c "import sys; assert not sys._is_gil_enabled()"
+      - run: >-
+          PYTHONPATH=. .venv/bin/python -m pytest -v
+          tests/test_thread_safety.py tests/test_breaker.py tests/test_sweep.py
+          tests/test_properties.py
