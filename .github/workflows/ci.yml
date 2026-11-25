@@ -97,3 +97,15 @@ jobs:
           docker exec app id -u | grep -qx 10001  # not running as root
       - if: failure()
         run: docker logs app
+      - name: Two servers from compose.yaml share one limit through Redis
+        run: |
+          docker compose up -d --build --wait
+          codes=""
+          for i in 1 2 3 4 5 6 7; do
+            port=$((8001 + i % 2))
+            codes="$codes $(curl -s -o /dev/null -w '%{http_code}' -H 'x-user-id: ci' localhost:$port/api/hello)"
+          done
+          echo "$codes"
+          test "$codes" = " 200 200 200 200 200 429 429"
+      - if: failure()
+        run: docker compose logs

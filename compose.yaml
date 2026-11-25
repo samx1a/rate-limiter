@@ -1,0 +1,30 @@
+# Two app servers sharing one Redis, to see the distributed limit for yourself:
+#
+#   docker compose up --build
+#   for i in 1 2 3 4 5 6; do
+#     curl -s -o /dev/null -w "%{http_code} " -H "x-user-id: me" localhost:800$((i % 2 + 1))/api/hello
+#   done
+#
+# Requests alternate between the two servers, but they share one count in Redis.
+services:
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      retries: 15
+
+  app1: &app
+    build: .
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      USER_LIMIT: 5/1m
+    ports: ["8001:8000"]
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  app2:
+    <<: *app
+    ports: ["8002:8000"]
