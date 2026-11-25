@@ -74,3 +74,16 @@ def test_memory_per_key_is_bounded_by_limit() -> None:
         limiter.hit("k")
         clock.advance(0.001)
     assert len(limiter._state["k"].entries) <= 5
+
+
+def test_waiting_exactly_reset_after_frees_the_log_despite_float_rounding() -> None:
+    """Found by the property tests: newest + window - now, added back onto now, can
+    land 2e-15 s short of newest + window, so the entry never looked expired."""
+    limiter, clock = make(limit=5, window=10)
+    last = None
+    for gap in (0.0, 0.0, 0.0, 1.0, 0.001, 0.001):
+        clock.advance(gap)
+        last = limiter.hit("k")
+    assert last is not None
+    clock.advance(last.reset_after)
+    assert limiter.hit("k", cost=5).allowed

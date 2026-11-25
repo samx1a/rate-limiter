@@ -7,8 +7,9 @@
 local function decide(key, limit, window, cost, now, id)
   -- Drop entries that slid out: an entry at time t counts while t + window > now.
   -- Pruning expired entries changes no decision, so it's fine even if we end up
-  -- not committing.
-  redis.call("ZREMRANGEBYSCORE", key, "-inf", now - window)
+  -- not committing. The 1e-6 ms (1e-9 s, same as the Python version) absorbs float
+  -- rounding when a client waits exactly the retry time we told it.
+  redis.call("ZREMRANGEBYSCORE", key, "-inf", now - window + EPSILON * 1000)
   local count = redis.call("ZCARD", key)
 
   local d = {}

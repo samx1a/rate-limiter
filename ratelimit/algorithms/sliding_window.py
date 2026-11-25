@@ -27,6 +27,11 @@ from dataclasses import dataclass, field
 from ratelimit.algorithms.base import WindowedLimiter
 from ratelimit.decision import Decision
 
+# An entry expires at exactly ts + window. Waiting the reset_after/retry_after we report
+# (ts + window - now) and adding it back onto now can land a hair short of ts + window
+# in floating point, so expiry allows for that much rounding.
+EPSILON = 1e-9
+
 
 @dataclass(slots=True)
 class _Log:
@@ -45,7 +50,7 @@ class SlidingWindowLog(WindowedLimiter[_Log]):
         log = state.entries
 
         # Drop entries that have slid out of the window: [now - window, now).
-        while log and log[0][0] + self._window <= now:
+        while log and log[0][0] + self._window <= now + EPSILON:
             state.total -= log.popleft()[1]
 
         if state.total + cost > self._limit:
@@ -63,7 +68,7 @@ class SlidingWindowLog(WindowedLimiter[_Log]):
 
     def _is_idle(self, state: _Log, now: float) -> bool:
         # The newest entry is the last to expire.
-        return not state.entries or state.entries[-1][0] + self._window <= now
+        return not state.entries or state.entries[-1][0] + self._window <= now + EPSILON
 
     def _reset_after(self, log: deque[tuple[float, int]], now: float) -> float:
         """Time until every entry has expired, i.e. the full limit is back."""
