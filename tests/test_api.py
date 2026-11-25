@@ -26,7 +26,12 @@ def get(c: TestClient, user: str | None = "alice", ip: str = "203.0.113.1") -> i
 def test_hello_returns_identity() -> None:
     c = client()
     body = c.get("/api/hello", headers={"x-real-ip": "203.0.113.1", "x-user-id": "alice"}).json()
-    assert body == {"message": "hello", "ip": "203.0.113.1", "user": "alice"}
+    assert body == {
+        "message": "hello",
+        "ip": "203.0.113.1",
+        "limited_as": "203.0.113.1",
+        "user": "alice",
+    }
 
 
 def test_user_limit_blocks_with_429() -> None:
@@ -129,3 +134,9 @@ def test_metrics_endpoint() -> None:
     assert 'ratelimit_decisions_total{policy="user",result="allowed"} 1' in text
     assert 'ratelimit_decisions_total{policy="user",result="blocked"} 1' in text
     assert "ratelimit_check_duration_ms_count 2" in text
+
+
+def test_hello_shows_the_real_ipv6_address_and_the_network_it_is_limited_as() -> None:
+    body = client().get("/api/hello", headers={"x-real-ip": "2001:db8:1:2::abcd"}).json()
+    assert body["ip"] == "2001:db8:1:2::abcd"
+    assert body["limited_as"] == "2001:db8:1:2::/64"

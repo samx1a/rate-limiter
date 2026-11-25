@@ -181,6 +181,7 @@ def create_app(
         peer = request.client.host if request.client else None
         ip = client_ip(peer, request.headers, settings.trusted_ip_header)
         request.state.allowlisted = is_allowlisted(ip, settings.ip_allowlist)
+        request.state.client_ip = ip  # the real address; Identity.ip is what's limited
         return Identity(ip=limit_subject(ip), user=user)
 
     # A plain (sync) dependency: FastAPI runs it in a worker thread, so a slow
@@ -277,8 +278,15 @@ def create_app(
         }
 
     @app.get("/api/hello", responses=LIMITED_RESPONSES)
-    def hello(verdict: Limited, identity: Annotated[Identity, Depends(identify)]) -> dict[str, Any]:
-        return {"message": "hello", "ip": identity.ip, "user": identity.user}
+    def hello(
+        verdict: Limited, identity: Annotated[Identity, Depends(identify)], request: Request
+    ) -> dict[str, Any]:
+        return {
+            "message": "hello",
+            "ip": request.state.client_ip,
+            "limited_as": identity.ip,  # same as ip, or the /64 for IPv6
+            "user": identity.user,
+        }
 
     @app.get("/api/report", responses=LIMITED_RESPONSES)
     def report(verdict: Expensive) -> dict[str, Any]:
