@@ -239,17 +239,30 @@ def build_redis_limiter(
             raise ValueError("the naive counter is a teaching baseline; it has no Redis version")
 
 
-def connect(url: str, timeout: float = 0.25, connect_timeout: float = 1.0) -> redis.Redis:
+def connect(
+    url: str,
+    timeout: float = 0.25,
+    connect_timeout: float = 1.0,
+    max_connections: int = 10,
+) -> redis.Redis:
     """A client tuned for a limiter on the request path: fail fast, never hang.
 
     A rate limiter must not become the slowest part of a request. Short timeouts plus
     fail-open in the service mean a Redis outage degrades to "no limiting", not to
     "every request hangs". Connecting gets a bit longer than each command because a
     new TLS connection (rediss://) needs a handshake first.
+
+    The pool is capped, because every server instance opens its own and hosted Redis
+    plans cap connections (30 on the free Redis Cloud plan). When all of them are busy
+    a request waits up to ``timeout`` for one to free up instead of failing straight
+    away; past that it counts as Redis being unavailable.
     """
-    return redis.Redis.from_url(
+    pool = redis.BlockingConnectionPool.from_url(
         url,
+        max_connections=max_connections,
+        timeout=timeout,
         socket_timeout=timeout,
         socket_connect_timeout=connect_timeout,
         health_check_interval=30,
     )
+    return redis.Redis.from_pool(pool)  # from_pool: close() also closes the pool

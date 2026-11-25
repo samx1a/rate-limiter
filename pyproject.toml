@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
-    "redis>=5.0",
+    "redis>=5.0.1",  # Redis.from_pool
 ]
 
 [project.optional-dependencies]

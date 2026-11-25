@@ -215,6 +215,7 @@ REDIS_URL=redis://127.0.0.1:6399/0 uv run pytest
 | `LOCAL_FALLBACK` | `true` | when Redis is unreachable, limit per server from memory |
 | `FAIL_OPEN` | `true` | with no local fallback, allow requests when Redis is unreachable |
 | `REDIS_TIMEOUT_MS` | `250` | per-command Redis timeout |
+| `REDIS_MAX_CONNECTIONS` | `10` | connection pool size per server process |
 | `REDIS_BATCH` | `true` | check both limits in one script (turn off on Redis Cluster) |
 | `BREAKER_THRESHOLD` | `3` | failures in a row before the circuit breaker stops calling Redis |
 | `BREAKER_COOLDOWN_MS` | `5000` | how long it waits before letting one request try Redis again |

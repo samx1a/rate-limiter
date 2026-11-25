@@ -44,6 +44,8 @@ class Settings:
     # Check the IP and user limits in one Redis round trip, all or nothing. Turn off on
     # Redis Cluster, where the two keys usually live on different nodes.
     redis_batch: bool = True
+    # Per server process. Hosted Redis plans cap total connections (free tier: 30).
+    redis_max_connections: int = 10
     # Circuit breaker: stop calling Redis after this many failures in a row, then try
     # one request every breaker_cooldown seconds.
     breaker_threshold: int = 3
@@ -102,6 +104,9 @@ class Settings:
                 key_prefix=read("RATE_LIMIT_PREFIX", str, defaults.key_prefix),
                 redis_timeout=read("REDIS_TIMEOUT_MS", _millis, defaults.redis_timeout),
                 redis_batch=read("REDIS_BATCH", _flag, defaults.redis_batch),
+                redis_max_connections=read(
+                    "REDIS_MAX_CONNECTIONS", _positive_int, defaults.redis_max_connections
+                ),
                 breaker_threshold=read(
                     "BREAKER_THRESHOLD", _positive_int, defaults.breaker_threshold
                 ),

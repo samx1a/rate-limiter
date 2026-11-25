@@ -66,7 +66,7 @@ def test_shutdown_closes_the_redis_client(
     with TestClient(create_app(settings)) as c:
         c.get("/api/hello")
         pool = created[0].connection_pool
-        connections = list(pool._available_connections)  # type: ignore[attr-defined]
+        connections = [c for c in pool._connections if c is not None]  # type: ignore[attr-defined]
         assert connections and all(conn._sock is not None for conn in connections)
     assert all(conn._sock is None for conn in connections)  # sockets closed on shutdown
 
@@ -93,3 +93,19 @@ def test_a_user_429_spends_ip_quota_only_without_batching(
     remaining = c.get("/api/hello", headers={"x-real-ip": "203.0.113.9"}).headers
     # IP spent: 1 (allowed) + 1 now, plus 3 for the 429s when checked one by one.
     assert remaining["RateLimit-Remaining"] == ("8" if batch else "5")
+
+
+def test_connection_pool_is_capped_and_waits_for_a_free_connection(
+    redis_client: redis.Redis, prefix: str
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    from ratelimit.redis_limiters import RedisTokenBucket, connect
+
+    client = connect(REDIS_URL, timeout=5.0, max_connections=2)
+    bucket = RedisTokenBucket(client, 1000, 1.0, prefix=prefix)
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        decisions = list(pool.map(lambda _: bucket.hit("k"), range(200)))
+    assert all(d.allowed for d in decisions)  # 16 threads shared 2 connections fine
+    assert len(client.connection_pool._connections) <= 2  # type: ignore[attr-defined]
+    client.close()

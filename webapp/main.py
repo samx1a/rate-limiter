@@ -104,7 +104,11 @@ def redis_client(settings: Settings) -> redis.Redis | None:
     if settings.backend is not Backend.REDIS:
         return None
     assert settings.redis_url  # checked in Settings
-    return connect(settings.redis_url, timeout=settings.redis_timeout)
+    return connect(
+        settings.redis_url,
+        timeout=settings.redis_timeout,
+        max_connections=settings.redis_max_connections,
+    )
 
 
 def build_service(
