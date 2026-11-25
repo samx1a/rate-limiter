@@ -21,15 +21,19 @@ ratelimit/
     counter.py         counts per key forever. just the baseline
     fixed_window.py    resets every N seconds. cheap, but leaks bursts at the edges
     sliding_window.py  looks back exactly N seconds from now
-    sliding_counter.py same idea with two numbers per key instead of a log
+    sliding_counter.py same idea with two counts per key instead of a log
     token_bucket.py    bursts up to a capacity, then refills at a steady rate
   lua/               the same four time-based algorithms as Redis Lua scripts
-  redis_limiters.py  Python side of the Redis version
+  redis_limiters.py  Python side of the Redis version, incl. checking several keys at once
   service.py         applies a per-IP limit and a per-user limit to each request
+  breaker.py         stops calling Redis while it's down
+  metrics.py         counters for /api/metrics
 webapp/              FastAPI app, 429s + headers, the demo page
-loadtest/            load test tool (results in docs/LOAD_TEST.md)
+loadtest/            load test tool, closed and open loop (results in docs/LOAD_TEST.md)
 bench/               micro-benchmarks for one limit check (docs/BENCHMARKS.md)
-tests/               195 tests
+examples/client.py   a client that backs off properly when it gets a 429
+tests/               358 tests: unit, property-based, Python vs Lua fuzzing, multi-process
+docs/                architecture, choosing an algorithm, load tests, benchmarks
 PROMPT.md            the spec and checklist I wrote before starting
 ```
 
@@ -180,10 +184,18 @@ limiting each address on its own would let someone pick a fresh one for every re
 ## Does it actually work
 
 - **Tests:** CI runs them on Python 3.11 to 3.14 against Redis 7, plus Redis 6 and
-  Redis 8 (what the live site uses), along with ruff and mypy in strict mode. In CI the Redis tests fail instead of
-  skipping if Redis isn't there, so they can't quietly not run.
-- **Same behavior on both backends:** `test_contract.py` runs one set of checks against
-  every algorithm in memory and in Redis.
+  Redis 8 (what the live site uses), with ruff, mypy in strict mode and a 90% coverage
+  floor. In CI the Redis tests fail instead of skipping if Redis isn't there, so they
+  can't quietly not run. The thread safety tests also run on free-threaded Python 3.14
+  (no GIL), where taking the lock out made 8 of them fail on every run I tried.
+- **Each algorithm keeps its promise on random traffic:** `test_properties.py` has
+  Hypothesis generate request patterns and checks things like "the sliding log never
+  lets more than the limit into any window" and "waiting retry_after always works".
+  This found a real float rounding bug in the sliding log.
+- **Python and Lua agree:** every algorithm exists twice. `test_differential.py` runs
+  random traffic through both side by side and compares every decision.
+- **Works in Docker:** CI builds the image, starts two containers on one Redis, and
+  checks they share a limit (five 200s, then 429s).
 - **Load tests** (full numbers in [docs/LOAD_TEST.md](docs/LOAD_TEST.md)):
 
   | Run | Req/s | Errors | Let through / max allowed |
@@ -192,6 +204,11 @@ limiting each address on its own would let someone pick a fresh one for every re
   | Redis, 4 processes, 1 hot user | 2,460 | 0 | 29 / 30 |
   | Redis, 4 processes, 1,000 users | 2,490 | 0 | 29,000 / 30,000 |
   | Live site, 10 clients | 32.5 | 0 | 79 / 80 |
+  | Live site again on 0.2.0 | 31.3 | 0 | 79 / 80 |
+
+  There's also an open-loop run that shows what happens past capacity: at a steady
+  2,500 req/s the p99 climbs to 7.7 s, while a closed-loop run at the same moment
+  reported under 90 ms.
 
 - **Live:** 20 requests sent at the same moment as one user get 10 or 11 through and
   the rest blocked. 10 is the bucket size; the 11th happens when the requests take
