@@ -17,8 +17,8 @@ jobs:
     name: Lint and type check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
       - run: uv sync --locked --extra dev
@@ -56,8 +56,8 @@ jobs:
       # The service container exists only for these tests, so server-wide ones may run.
       REDIS_DISPOSABLE: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: ${{ matrix.python }}
       - run: uv sync --locked --extra dev
@@ -70,8 +70,8 @@ jobs:
     name: Thread safety (Python 3.14t, no GIL)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.14t"
       - run: uv venv --python 3.14t
@@ -86,7 +86,7 @@ jobs:
     name: Docker image builds and serves
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: docker build -t rate-limiter .
       - name: Start it and hit the API
         run: |
