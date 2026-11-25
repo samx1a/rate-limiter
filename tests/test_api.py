@@ -155,3 +155,10 @@ def test_warns_when_a_route_can_never_fit_a_limit(caplog: pytest.LogCaptureFixtu
     with caplog.at_level(logging.WARNING, logger="webapp.main"):
         client(user_limit=10)
     assert not caplog.records
+
+
+def test_info_describes_outage_behaviour() -> None:
+    info = client().get("/api/info").json()
+    assert info["backend"] == "memory"
+    assert info["redis_batch"] is False  # only meaningful with Redis
+    assert {"local_fallback", "fail_open"} <= set(info)

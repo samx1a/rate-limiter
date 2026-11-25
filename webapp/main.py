@@ -318,6 +318,7 @@ def create_app(
             "backend": str(settings.backend),
             "algorithm": str(settings.algorithm),
             "limits": {"ip": str(settings.ip_limit), "user": str(settings.user_limit)},
+            "redis_batch": settings.backend is Backend.REDIS and settings.redis_batch,
             "local_fallback": settings.local_fallback,
             "fail_open": settings.fail_open,
         }

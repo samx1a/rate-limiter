@@ -135,11 +135,16 @@
 
   fetch("/api/info").then((r) => r.json()).then((info) => {
     const badges = $("badges"); badges.textContent = "";
-    for (const text of [
+    const badgeTexts = [
       "backend: " + info.backend, "algorithm: " + info.algorithm,
       "per user: " + info.limits.user, "per IP: " + info.limits.ip,
-      info.fail_open ? "fails open" : "fails closed",
-    ]) {
+    ];
+    if (info.backend === "redis") {
+      if (info.redis_batch) badgeTexts.push("both limits in one Redis call");
+      badgeTexts.push("if Redis is down: " + (info.local_fallback ? "limits from memory"
+        : info.fail_open ? "fails open" : "returns 503"));
+    }
+    for (const text of badgeTexts) {
       const b = document.createElement("span"); b.className = "badge"; b.textContent = text; badges.append(b);
     }
   }).catch(() => { $("badges").textContent = ""; });
