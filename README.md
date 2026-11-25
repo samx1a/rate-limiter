@@ -35,6 +35,8 @@ PROMPT.md            the spec and checklist I wrote before starting
 
 If you want the big picture first, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) follows
 one request through every layer and lists what happens when each piece fails.
+[docs/ALGORITHMS.md](docs/ALGORITHMS.md) compares the four algorithms and says when I'd
+pick each one.
 
 ## The fixed window edge problem
 
