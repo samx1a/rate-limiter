@@ -122,6 +122,23 @@ spread requests over more than one server instance. The bucket holds 10, and whe
 20 requests take a bit over a second to all land, 1 more token refills in that time, so
 11 is correct too.
 
+### Again on 0.2.0 (2026-11-25)
+
+Same run as the first live one, after all the 0.2.0 changes (batched checks, breaker,
+fallback, capped connection pool):
+
+| Clients | Users | Duration | Requests | Req/s | 200 | 429 | Errors | Latency p50 / p95 / p99 | Limit check p50 / p95 / p99 | Let through / max |
+|---------|-------|----------|----------|-------|-----|-----|--------|-------------------------|-----------------------------|-------------------|
+| 10 | 50 | 20.3s | 635 | 31.3 | 79 | 556 | 0 | 297 / 386 / 718 ms | 1.5 / 2.8 / 58 ms | 79 / 80 |
+
+Same throughput, same 0 errors, same 79 of a possible 80. The limit check column comes
+from the new `Server-Timing` collection in the load tool. Its p99 of 58 ms is the few
+requests that landed on a fresh Vercel instance and had to open a TLS connection to
+Redis first; the p95 is under 3 ms.
+
+The 20-at-once burst, twice, 25 seconds apart (as two different users): 10 through and
+10 blocked both times.
+
 ## Running them yourself
 
 ```bash
