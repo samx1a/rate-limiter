@@ -55,6 +55,9 @@ class Result:
     statuses: dict[str, int] = field(default_factory=dict)
     transport_errors: dict[str, int] = field(default_factory=dict)
     latency_ms: dict[str, float] = field(default_factory=dict)
+    # From each response's Server-Timing header: how long the limit check itself took
+    # inside the server, without the network and queueing around it.
+    limit_check_ms: dict[str, float] = field(default_factory=dict)
     requests_per_s: float = 0.0
     errors: int = 0
     admitted: int = 0
@@ -71,8 +74,37 @@ def max_admissible(algorithm: Algorithm, spec: LimitSpec, seconds: float) -> int
     windows = math.ceil(seconds / spec.period)
     if algorithm is Algorithm.SLIDING_WINDOW:
         return spec.requests * windows
-    # fixed window: a run can touch one more calendar window than it spans
+    if algorithm is Algorithm.COUNTER:
+        return spec.requests
+    # fixed window and sliding counter: at most the limit per calendar window, and a
+    # run can touch one more calendar window than it spans
     return spec.requests * (windows + 1)
+
+
+def server_timing_ms(header: str | None, name: str = "ratelimit") -> float | None:
+    """``ratelimit;dur=0.98`` -> 0.98. None if the metric isn't there."""
+    for metric in (header or "").split(","):
+        parts = [part.strip() for part in metric.split(";")]
+        if parts[0] != name:
+            continue
+        for part in parts[1:]:
+            if part.startswith("dur="):
+                try:
+                    return float(part[4:])
+                except ValueError:
+                    return None
+    return None
+
+
+def summarize(values: list[float]) -> dict[str, float]:
+    values = sorted(values)
+    return {
+        "p50": round(percentile(values, 50), 2),
+        "p95": round(percentile(values, 95), 2),
+        "p99": round(percentile(values, 99), 2),
+        "max": round(values[-1], 2) if values else 0.0,
+        "mean": round(statistics.fmean(values), 2) if values else 0.0,
+    }
 
 
 def percentile(sorted_values: list[float], p: float) -> float:
@@ -86,6 +118,7 @@ async def run(args: argparse.Namespace) -> Result:
     statuses: Counter[str] = Counter()
     transport: Counter[str] = Counter()
     latencies: list[float] = []
+    checks: list[float] = []
     counter = 0
     limits = httpx.Limits(
         max_connections=args.concurrency, max_keepalive_connections=args.concurrency
@@ -106,6 +139,9 @@ async def run(args: argparse.Namespace) -> Result:
                     response = await client.get(args.url, headers=headers)
                     statuses[str(response.status_code)] += 1
                     latencies.append((time.perf_counter() - scheduled) * 1000)
+                    check = server_timing_ms(response.headers.get("server-timing"))
+                    if check is not None:
+                        checks.append(check)
                 except httpx.HTTPError as exc:
                     transport[type(exc).__name__] += 1
 
@@ -128,7 +164,6 @@ async def run(args: argparse.Namespace) -> Result:
             await asyncio.gather(*(worker() for _ in range(args.concurrency)))
         elapsed = time.perf_counter() - started
 
-    latencies.sort()
     total = sum(statuses.values()) + sum(transport.values())
     result = Result(
         url=args.url,
@@ -140,13 +175,8 @@ async def run(args: argparse.Namespace) -> Result:
         requests=total,
         statuses=dict(sorted(statuses.items())),
         transport_errors=dict(transport),
-        latency_ms={
-            "p50": round(percentile(latencies, 50), 2),
-            "p95": round(percentile(latencies, 95), 2),
-            "p99": round(percentile(latencies, 99), 2),
-            "max": round(latencies[-1], 2) if latencies else 0.0,
-            "mean": round(statistics.fmean(latencies), 2) if latencies else 0.0,
-        },
+        latency_ms=summarize(latencies),
+        limit_check_ms=summarize(checks) if checks else {},
         requests_per_s=round(total / elapsed, 1),
         errors=sum(transport.values())
         + sum(n for code, n in statuses.items() if code not in {"200", "429"}),

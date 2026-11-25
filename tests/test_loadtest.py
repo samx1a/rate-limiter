@@ -75,3 +75,21 @@ def test_open_loop_sends_on_schedule_and_never_over_admits() -> None:
     assert result["errors"] == 0
     assert result["admitted"] == 10  # 5 per user, 2 users, nothing refills in 1s
     assert result["over_admitted"] is False
+    check = result["limit_check_ms"]
+    assert isinstance(check, dict) and 0 < check["p50"] < 50  # read from Server-Timing
+
+
+def test_server_timing_parsing() -> None:
+    from loadtest.loadtest import server_timing_ms
+
+    assert server_timing_ms("ratelimit;dur=0.98") == 0.98
+    assert server_timing_ms("db;dur=4, ratelimit;desc=x;dur=1.5") == 1.5
+    assert server_timing_ms("db;dur=4") is None
+    assert server_timing_ms("ratelimit;dur=fast") is None
+    assert server_timing_ms(None) is None
+
+
+def test_bounds_for_every_algorithm() -> None:
+    spec = LimitSpec(10, 10)
+    assert max_admissible(Algorithm.SLIDING_COUNTER, spec, 20) == 30  # per calendar window
+    assert max_admissible(Algorithm.COUNTER, spec, 1000) == 10  # never resets
