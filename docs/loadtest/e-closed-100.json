@@ -1,0 +1,35 @@
+{
+  "url": "http://127.0.0.1:8101/api/hello",
+  "duration_s": 15.09,
+  "concurrency": 100,
+  "users": 1000,
+  "mode": "closed",
+  "target_rate": null,
+  "requests": 34764,
+  "statuses": {
+    "200": 24000,
+    "429": 10764
+  },
+  "transport_errors": {},
+  "latency_ms": {
+    "p50": 39.57,
+    "p95": 66.87,
+    "p99": 88.41,
+    "max": 108.89,
+    "mean": 43.2
+  },
+  "limit_check_ms": {
+    "p50": 0.18,
+    "p95": 0.47,
+    "p99": 0.96,
+    "max": 15.18,
+    "mean": 0.23
+  },
+  "requests_per_s": 2303.9,
+  "errors": 0,
+  "admitted": 24000,
+  "admitted_max": 25000,
+  "over_admitted": false,
+  "started_at": "2026-11-25T05:07:18+00:00",
+  "machine": "Darwin arm64, Python 3.11.13"
+}

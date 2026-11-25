@@ -39,6 +39,43 @@ The jump in latency from A to B is mostly queueing with 100 clients on one lapto
 one Redis round trip per check. After run C, all 1,000 user keys expired from Redis by
 themselves about 11 seconds later, which is the refill time plus a 1 second margin.
 
+## Closed loop vs open loop (2026-11-25)
+
+The runs above are closed loop: 100 clients that each wait for an answer before
+sending again. When the server slows down, the clients slow down with it and send
+less, so the latency numbers stay flattering. Real users don't wait for each other.
+So I added an open-loop mode (`--rate`) that sends on a fixed schedule and measures
+each request from when it should have gone out.
+
+Same setup as run C (Redis, 4 server processes, 1,000 users, token bucket 10/10s),
+15 seconds each, laptop busy with other stuff so the absolute numbers are lower than
+on 11-23:
+
+| Run | Mode | Target | Got | 200 | 429 | Errors | Latency p50 / p95 / p99 | Limit check p50 / p99 | Let through / max |
+|-----|------|--------|-----|-----|-----|--------|-------------------------|-----------------------|-------------------|
+| E | closed, 100 clients | - | 2,304 req/s | 24,000 | 10,764 | 0 | 40 / 67 / 88 ms | 0.18 / 0.96 ms | 24,000 / 25,000 |
+| F1 | open | 1,500 req/s | 1,482 req/s | 22,500 | 0 | 0 | 89 / 141 / 210 ms | 0.21 / 0.64 ms | 22,500 / 25,000 |
+| F2 | open | 2,500 req/s | 1,644 req/s | 31,500 | 6,000 | 0 | 3,786 / 7,536 / 7,709 ms | 0.34 / 1.85 ms | 31,500 / 32,000 |
+
+I ran all three again right after and got the same picture (closed 1,807 req/s with
+p99 79 ms; open 1,500 kept up with p99 166 ms; open 2,500 only got 1,566 req/s with
+p99 8.8 s).
+
+What it shows:
+
+- Below capacity (F1) everything keeps up and latency stays low.
+- Above capacity (F2) the server can't keep up, requests queue, and latency climbs into
+  seconds. The closed loop at the same moment said p99 was under 90 ms. Both are
+  "true", but only the open loop tells you what users would actually feel.
+- The limit check itself (from `Server-Timing`) stays under 2 ms even in F2. The time
+  is going to queueing in front of the app, not to Redis or the Lua scripts.
+- No run let through more than the limit allows.
+
+One thing I had to fix to get these numbers: my first version of the open loop made
+one task per request, and with a backlog the load tool itself slowed down (asking for
+2,000 req/s got fewer than asking for 1,500). Now a fixed pool of workers pulls from a
+queue.
+
 ## Live site (2026-11-23)
 
 https://rate-limiter-lac.vercel.app. The function runs in Vercel's `iad1` region
@@ -104,6 +141,12 @@ uv run python -m loadtest.loadtest --url http://127.0.0.1:8101/api/hello \
   --duration 20 --concurrency 100 --users 1 --limit 10/10s      # B
 uv run python -m loadtest.loadtest --url http://127.0.0.1:8101/api/hello \
   --duration 20 --concurrency 100 --users 1000 --limit 10/10s   # C
+
+# runs E and F: same server as B/C
+uv run python -m loadtest.loadtest --url http://127.0.0.1:8101/api/hello \
+  --duration 15 --concurrency 100 --users 1000 --limit 10/10s                # E
+uv run python -m loadtest.loadtest --url http://127.0.0.1:8101/api/hello \
+  --duration 15 --rate 1500 --concurrency 100 --users 1000 --limit 10/10s    # F1 (2500 for F2)
 
 # live site: one per-IP limit covers everything, so --limit-keys 1
 uv run python -m loadtest.loadtest --url https://rate-limiter-lac.vercel.app/api/hello \
