@@ -203,6 +203,11 @@ REDIS_URL=redis://127.0.0.1:6399/0 uv run uvicorn webapp.main:app --reload
 REDIS_URL=redis://127.0.0.1:6399/0 uv run pytest
 ```
 
+Or use the Makefile: `make redis` starts a throwaway Redis, `make check` runs what CI
+runs, and `make` lists the rest. `make up` (or `docker compose up --build`) starts two
+app servers sharing one Redis on ports 8001 and 8002, so you can watch them share a
+limit.
+
 | Setting | Default | What it does |
 |---------|---------|--------------|
 | `RATE_LIMIT_BACKEND` | `redis` if `REDIS_URL` is set, else `memory` | where the counts live |
