@@ -18,6 +18,7 @@ import redis
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
+from ratelimit import __version__
 from ratelimit.breaker import BreakerState, CircuitBreaker
 from ratelimit.decision import LimiterUnavailable, RateLimiter
 from ratelimit.limits import LimitSpec, build_limiter
@@ -198,7 +199,7 @@ def create_app(
         if client is not None:
             client.close()  # give the pooled connections back on shutdown
 
-    app = FastAPI(title="rate-limiter", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="rate-limiter", version=__version__, lifespan=lifespan)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next: Any) -> Any:
@@ -315,6 +316,7 @@ def create_app(
     @app.get("/api/info")
     def info() -> dict[str, Any]:
         return {
+            "version": __version__,
             "backend": str(settings.backend),
             "algorithm": str(settings.algorithm),
             "limits": {"ip": str(settings.ip_limit), "user": str(settings.user_limit)},

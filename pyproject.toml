@@ -1,6 +1,6 @@
 [project]
 name = "rate-limiter"
-version = "0.1.0"
+dynamic = ["version"]  # from ratelimit/__init__.py, so there's one place to bump it
 description = "Rate limiting from a naive counter to atomic Redis Lua scripts, served with FastAPI."
 readme = "README.md"
 license = "MIT"
@@ -40,6 +40,9 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "ratelimit/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["ratelimit", "webapp"]

@@ -162,3 +162,14 @@ def test_info_describes_outage_behaviour() -> None:
     assert info["backend"] == "memory"
     assert info["redis_batch"] is False  # only meaningful with Redis
     assert {"local_fallback", "fail_open"} <= set(info)
+
+
+def test_one_version_everywhere() -> None:
+    from importlib.metadata import version
+
+    import ratelimit
+
+    c = client()
+    assert c.get("/api/info").json()["version"] == ratelimit.__version__
+    assert c.get("/openapi.json").json()["info"]["version"] == ratelimit.__version__
+    assert version("rate-limiter") == ratelimit.__version__  # what pyproject builds
