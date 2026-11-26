@@ -140,3 +140,19 @@ def test_breaker_state_shows_up_in_ready_and_metrics() -> None:
         c.get("/api/hello")
     assert c.get("/api/ready").json()["breaker"] == "open"
     assert "ratelimit_breaker_open 1" in c.get("/api/metrics").text
+
+
+def test_503_retry_after_matches_the_breaker_cooldown() -> None:
+    dead = Settings(
+        backend=Backend.REDIS,
+        redis_url=DEAD_REDIS,
+        fail_open=False,
+        local_fallback=False,
+        breaker_threshold=1,
+        breaker_cooldown=7.0,
+    )
+    c = TestClient(create_app(dead))
+    c.get("/api/hello")  # trips the breaker
+    response = c.get("/api/hello")
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] in {"6", "7"}  # not "1"

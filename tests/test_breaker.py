@@ -95,3 +95,14 @@ def test_only_one_thread_gets_the_trial() -> None:
 def test_rejects_bad_config(threshold: int, cooldown: float) -> None:
     with pytest.raises(ValueError):
         CircuitBreaker(threshold, cooldown)
+
+
+def test_retry_after_counts_down_the_cooldown() -> None:
+    breaker, clock = make(threshold=1, cooldown=5)
+    assert breaker.retry_after() == 0
+    breaker.record_failure()
+    assert breaker.retry_after() == 5
+    clock.advance(3.5)
+    assert breaker.retry_after() == 1.5
+    clock.advance(1.5)
+    assert breaker.retry_after() == 0  # half-open: a trial may go now

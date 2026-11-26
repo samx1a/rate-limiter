@@ -24,7 +24,7 @@ from ratelimit.decision import LimiterUnavailable, RateLimiter
 from ratelimit.limits import LimitSpec, build_limiter
 from ratelimit.redis_limiters import build_redis_limiter, connect, hit_many
 from ratelimit.service import BatchHit, Identity, Policy, RateLimitService, Scope, Verdict
-from webapp.headers import rate_limit_headers
+from webapp.headers import rate_limit_headers, whole_seconds
 from webapp.identity import (
     InvalidIdentity,
     client_ip,
@@ -240,10 +240,13 @@ def create_app(
             try:
                 verdict = service.check(identity, weight)
             except LimiterUnavailable as exc:  # only reached when FAIL_OPEN=false
+                # While the breaker is open nothing will change until its cooldown
+                # ends, so say exactly that instead of inviting a retry every second.
+                wait = breaker.retry_after() if breaker is not None else 0.0
                 raise HTTPException(
                     status_code=503,
                     detail={"error": "limiter_unavailable", "message": "Try again shortly."},
-                    headers={"Retry-After": "1"},
+                    headers={"Retry-After": str(max(1, whole_seconds(wait)))},
                 ) from exc
             headers = rate_limit_headers(verdict, service.policies)
             # How long the limit check took, visible in browser dev tools. This is how the

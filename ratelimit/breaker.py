@@ -55,6 +55,14 @@ class CircuitBreaker:
             return BreakerState.OPEN
         return BreakerState.HALF_OPEN
 
+    def retry_after(self) -> float:
+        """Seconds until the next trial call is allowed; 0 unless the breaker is open."""
+        with self._lock:
+            if self._state() is not BreakerState.OPEN:
+                return 0.0
+            assert self._opened_at is not None
+            return self._cooldown - (self._clock.now() - self._opened_at)
+
     def allow(self) -> bool:
         """May the caller try the store now? A True in half-open state is the one
         trial call, and the caller must report how it went."""
