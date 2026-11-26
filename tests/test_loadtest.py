@@ -93,3 +93,27 @@ def test_bounds_for_every_algorithm() -> None:
     spec = LimitSpec(10, 10)
     assert max_admissible(Algorithm.SLIDING_COUNTER, spec, 20) == 30  # per calendar window
     assert max_admissible(Algorithm.COUNTER, spec, 1000) == 10  # never resets
+
+
+def test_warmup_requests_are_left_out_of_latency_only() -> None:
+    from webapp.settings import Settings
+
+    settings = Settings(user_limit=LimitSpec(1000, 10), ip_limit=LimitSpec(10_000, 1))
+    result = run_against(
+        settings,
+        [
+            "--rate",
+            "100",
+            "--duration",
+            "1",
+            "--warmup",
+            "0.5",
+            "--users",
+            "2",
+            "--concurrency",
+            "10",
+        ],
+    )
+    assert result["requests"] == 100  # every request is still counted
+    assert result["warmup_requests"] == 50  # the first half second
+    assert result["warmup_s"] == 0.5

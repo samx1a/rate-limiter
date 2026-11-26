@@ -134,7 +134,9 @@ fallback, capped connection pool):
 Same throughput, same 0 errors, same 79 of a possible 80. The limit check column comes
 from the new `Server-Timing` collection in the load tool. Its p99 of 58 ms is the few
 requests that landed on a fresh Vercel instance and had to open a TLS connection to
-Redis first; the p95 is under 3 ms.
+Redis first; the p95 is under 3 ms. For runs where you only care about steady
+state, `--warmup 3` leaves the first 3 seconds out of the latency numbers (those
+requests still count toward throughput, status codes and the admission check).
 
 The 20-at-once burst, twice, 25 seconds apart (as two different users): 10 through and
 10 blocked both times.

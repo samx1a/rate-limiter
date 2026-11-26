@@ -51,6 +51,9 @@ class Result:
     users: int
     mode: str = "closed"
     target_rate: float | None = None
+    warmup_s: float = 0.0
+    # Requests sent during the warmup: counted everywhere except the latency numbers.
+    warmup_requests: int = 0
     requests: int = 0
     statuses: dict[str, int] = field(default_factory=dict)
     transport_errors: dict[str, int] = field(default_factory=dict)
@@ -119,6 +122,7 @@ async def run(args: argparse.Namespace) -> Result:
     transport: Counter[str] = Counter()
     latencies: list[float] = []
     checks: list[float] = []
+    warmup_requests = 0
     counter = 0
     limits = httpx.Limits(
         max_connections=args.concurrency, max_keepalive_connections=args.concurrency
@@ -132,10 +136,17 @@ async def run(args: argparse.Namespace) -> Result:
         async def send(n: int, scheduled: float) -> None:
             """One request. Latency counts from ``scheduled``: in open-loop mode that
             includes time spent waiting for a free worker, as a real client would."""
+            nonlocal warmup_requests
             headers = {"x-user-id": f"{args.user_prefix}{n % args.users}"}
+            warming_up = scheduled < started + args.warmup
             try:
                 response = await client.get(args.url, headers=headers)
                 statuses[str(response.status_code)] += 1
+                if warming_up:
+                    # Still opening connections / waking servers up: real, but a
+                    # startup cost, not steady-state latency.
+                    warmup_requests += 1
+                    return
                 latencies.append((time.perf_counter() - scheduled) * 1000)
                 check = server_timing_ms(response.headers.get("server-timing"))
                 if check is not None:
@@ -184,6 +195,8 @@ async def run(args: argparse.Namespace) -> Result:
         users=args.users,
         mode="open" if args.rate else "closed",
         target_rate=args.rate,
+        warmup_s=args.warmup,
+        warmup_requests=warmup_requests,
         requests=total,
         statuses=dict(sorted(statuses.items())),
         transport_errors=dict(transport),
@@ -228,6 +241,13 @@ def build_parser() -> argparse.ArgumentParser:
         "Use 1 when one per-IP limit covers all traffic from this machine.",
     )
     parser.add_argument("--algorithm", default="token_bucket", choices=[a.value for a in Algorithm])
+    parser.add_argument(
+        "--warmup",
+        type=float,
+        default=0.0,
+        help="seconds at the start to leave out of the latency numbers (cold starts, "
+        "new connections). Those requests still count toward everything else.",
+    )
     parser.add_argument("--json", help="also write the result to this file")
     return parser
 
