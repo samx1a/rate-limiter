@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
 
+# Actions are pinned to full commit SHAs, not tags: a tag can be moved to point at
+# different code, a commit can't. Dependabot keeps the pins (and comments) current.
 permissions:
   contents: read
 
@@ -17,8 +19,8 @@ jobs:
     name: Lint and type check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d  # v10.4.0
         with:
           python-version: "3.12"
       - run: uv sync --locked --extra dev
@@ -56,8 +58,8 @@ jobs:
       # The service container exists only for these tests, so server-wide ones may run.
       REDIS_DISPOSABLE: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d  # v10.4.0
         with:
           python-version: ${{ matrix.python }}
       - run: uv sync --locked --extra dev
@@ -70,8 +72,8 @@ jobs:
     name: Thread safety (Python 3.14t, no GIL)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d  # v10.4.0
         with:
           python-version: "3.14t"
       - run: uv venv --python 3.14t
@@ -86,7 +88,7 @@ jobs:
     name: Docker image builds and serves
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - run: docker build -t rate-limiter .
       - name: Start it and hit the API
         run: |
