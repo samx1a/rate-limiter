@@ -41,9 +41,21 @@ def test_ip_uses_the_trusted_header_when_configured() -> None:
     assert client_ip("10.0.0.7", {"x-real-ip": "203.0.113.9"}, "X-Real-IP") == "203.0.113.9"
 
 
-def test_ip_takes_the_first_hop_of_a_list() -> None:
-    headers = {"x-forwarded-for": "203.0.113.9, 10.0.0.1"}
+def test_a_client_cannot_pick_its_ip_by_prepending_to_x_forwarded_for() -> None:
+    """The client sent "6.6.6.6"; our one proxy appended the address it really saw."""
+    headers = {"x-forwarded-for": "6.6.6.6, 203.0.113.9"}
     assert client_ip("10.0.0.7", headers, "x-forwarded-for") == "203.0.113.9"
+
+
+def test_with_two_proxies_the_client_is_second_from_the_right() -> None:
+    # client-claimed, real client (added by the CDN), CDN (added by the load balancer)
+    headers = {"x-forwarded-for": "6.6.6.6, 203.0.113.9, 198.51.100.1"}
+    assert client_ip("10.0.0.7", headers, "x-forwarded-for", 2) == "203.0.113.9"
+
+
+def test_too_few_hops_means_the_header_is_not_trusted() -> None:
+    headers = {"x-forwarded-for": "203.0.113.9"}  # skipped one of our two proxies
+    assert client_ip("10.0.0.7", headers, "x-forwarded-for", 2) == "10.0.0.7"
 
 
 def test_ip_falls_back_to_peer_when_trusted_header_is_missing_or_garbage() -> None:

@@ -21,6 +21,7 @@ def test_every_variable_is_read() -> None:
             "IP_LIMIT": "100/1m",
             "USER_LIMIT": "5/s",
             "TRUSTED_IP_HEADER": "x-real-ip",
+            "TRUSTED_PROXY_HOPS": "2",
             "LOCAL_FALLBACK": "false",
             "FAIL_OPEN": "no",
         }
@@ -38,6 +39,7 @@ def test_every_variable_is_read() -> None:
         ip_limit=LimitSpec(100, 60),
         user_limit=LimitSpec(5, 1),
         trusted_ip_header="x-real-ip",
+        trusted_proxy_hops=2,
         local_fallback=False,
         fail_open=False,
     )

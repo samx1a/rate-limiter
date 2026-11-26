@@ -217,7 +217,9 @@ def create_app(
         except InvalidIdentity as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         peer = request.client.host if request.client else None
-        ip = client_ip(peer, request.headers, settings.trusted_ip_header)
+        ip = client_ip(
+            peer, request.headers, settings.trusted_ip_header, settings.trusted_proxy_hops
+        )
         request.state.allowlisted = is_allowlisted(ip, settings.ip_allowlist)
         request.state.client_ip = ip  # the real address; Identity.ip is what's limited
         return Identity(ip=limit_subject(ip), user=user)

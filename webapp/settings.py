@@ -57,6 +57,9 @@ class Settings:
     ip_limit: LimitSpec = DEFAULT_IP_LIMIT
     user_limit: LimitSpec = DEFAULT_USER_LIMIT
     trusted_ip_header: str | None = None
+    # How many proxies in front of the app append to trusted_ip_header. The client IP
+    # is that many entries from the right (see webapp/identity.py).
+    trusted_proxy_hops: int = 1
     # Clients that skip rate limiting entirely, e.g. your own monitoring or an
     # internal service. Matched against the resolved client IP.
     ip_allowlist: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = ()
@@ -115,6 +118,9 @@ class Settings:
                 ip_limit=read("IP_LIMIT", parse_limit, defaults.ip_limit),
                 user_limit=read("USER_LIMIT", parse_limit, defaults.user_limit),
                 trusted_ip_header=env.get("TRUSTED_IP_HEADER") or None,
+                trusted_proxy_hops=read(
+                    "TRUSTED_PROXY_HOPS", _positive_int, defaults.trusted_proxy_hops
+                ),
                 ip_allowlist=read("IP_ALLOWLIST", _networks, defaults.ip_allowlist),
                 local_fallback=read("LOCAL_FALLBACK", _flag, defaults.local_fallback),
                 fail_open=read("FAIL_OPEN", _flag, defaults.fail_open),

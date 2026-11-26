@@ -175,7 +175,8 @@ before it gets blocked.
 For the IP, the app uses the socket address unless you tell it to trust a proxy header.
 On Vercel I set `TRUSTED_IP_HEADER=x-real-ip`, since Vercel overwrites that header
 itself. Sending a fake `X-Forwarded-For` to the live site doesn't change your IP (I
-checked).
+checked). If you use `X-Forwarded-For` instead, the IP is read from the right end,
+because proxies append to it and everything on the left is whatever the client sent.
 
 IPv6 clients are limited per /64 network instead of per address. A home connection or
 a cloud server usually gets a whole /64 to itself, which is billions of addresses, so
@@ -245,6 +246,7 @@ limit.
 | `IP_LIMIT` | `60/1m` | per-IP limit, written like `10/s`, `100/1m`, `5/30s` |
 | `USER_LIMIT` | `10/10s` | per-user limit |
 | `TRUSTED_IP_HEADER` | none | proxy header to read the client IP from (`x-real-ip` on Vercel) |
+| `TRUSTED_PROXY_HOPS` | `1` | how many of your proxies append to that header; the client IP is that many entries from the right |
 | `IP_ALLOWLIST` | none | IPs or CIDR ranges that skip limiting, e.g. `10.0.0.0/8, 192.0.2.7` |
 | `LOCAL_FALLBACK` | `true` | when Redis is unreachable, limit per server from memory |
 | `FAIL_OPEN` | `true` | with no local fallback, allow requests when Redis is unreachable |

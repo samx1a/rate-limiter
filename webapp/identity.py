@@ -44,15 +44,31 @@ def user_from_headers(headers: Mapping[str, str]) -> str | None:
     return value
 
 
-def client_ip(peer: str | None, headers: Mapping[str, str], trusted_ip_header: str | None) -> str:
+def client_ip(
+    peer: str | None,
+    headers: Mapping[str, str],
+    trusted_ip_header: str | None,
+    trusted_hops: int = 1,
+) -> str:
+    """The client's IP.
+
+    Proxies *append* to ``X-Forwarded-For``: ``client-claimed, ..., what-proxy-saw``.
+    Everything left of the entries your own proxies added was written by the client
+    and can be anything, so the address is read from the right: with ``trusted_hops``
+    proxies in front of the app, it's the ``trusted_hops``-th entry from the end.
+    Headers your proxy overwrites with a single value (Vercel's ``x-real-ip``) work
+    the same way with the default of 1.
+    """
     if trusted_ip_header:
         raw = headers.get(trusted_ip_header.lower())
         if raw:
-            # A proxy that sets the header may still list several hops; the first one
-            # is the client it saw.
-            candidate = raw.split(",")[0].strip()
-            if _is_ip(candidate):
-                return candidate
+            hops = [part.strip() for part in raw.split(",") if part.strip()]
+            if len(hops) >= trusted_hops:
+                candidate = hops[-trusted_hops]
+                if _is_ip(candidate):
+                    return candidate
+            # Fewer entries than proxies we trust: it didn't come through all of them,
+            # so nothing in the header can be trusted. Use the socket address.
     if peer and _is_ip(peer):
         return peer
     return "unknown"
