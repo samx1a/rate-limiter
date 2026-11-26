@@ -64,3 +64,10 @@ def test_every_response_gets_basic_security_headers() -> None:
         headers = c.get(path).headers
         assert headers["X-Content-Type-Options"] == "nosniff", path
         assert headers["Referrer-Policy"] == "no-referrer", path
+
+
+def test_simulate_is_cacheable() -> None:
+    c = TestClient(create_app(Settings()))
+    response = c.get("/api/simulate")
+    assert "s-maxage=" in response.headers["Cache-Control"]
+    assert simulate(Scenario.STEADY) is simulate(Scenario.STEADY)  # computed once

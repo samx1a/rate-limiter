@@ -293,7 +293,13 @@ def create_app(
         )
 
     @app.get("/api/simulate")
-    def simulate_route(scenario: Scenario = Scenario.EDGE_BURST) -> dict[str, Any]:
+    def simulate_route(
+        response: Response, scenario: Scenario = Scenario.EDGE_BURST
+    ) -> dict[str, Any]:
+        # Same input, same answer, until the code changes. Computing it is cheap; the
+        # point is letting a CDN answer without running the app at all. s-maxage is
+        # for shared caches (Vercel's edge, which clears its cache on every deploy).
+        response.headers["Cache-Control"] = "public, max-age=3600, s-maxage=86400"
         return simulate(scenario)
 
     @app.get("/api/health")

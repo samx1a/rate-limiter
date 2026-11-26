@@ -6,6 +6,7 @@ requests. Runs instantly (no sleeping) and keeps no state between calls.
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -56,7 +57,9 @@ def max_in_span(times: list[float], span: float) -> int:
     return best
 
 
+@functools.cache
 def simulate(scenario: Scenario) -> dict[str, object]:
+    """Cached: the result only depends on the scenario. Callers must not mutate it."""
     times = _times(scenario)
     rows = []
     for algorithm in COMPARED:
