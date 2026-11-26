@@ -20,6 +20,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from ratelimit import __version__
+from ratelimit.algorithms.base import InMemoryLimiter
 from ratelimit.breaker import BreakerState, CircuitBreaker
 from ratelimit.decision import LimiterUnavailable, RateLimiter
 from ratelimit.limits import LimitSpec, build_limiter
@@ -191,6 +192,15 @@ def create_app(
     if breaker is not None:
         b = breaker
         service.metrics.gauge("ratelimit_breaker_open", lambda: b.state is not BreakerState.CLOSED)
+    # Keys held in process memory: the limiters themselves on the memory backend, the
+    # fallbacks on Redis (0 until an outage). Lets you check the auto-sweep keeps it flat.
+    in_memory = [
+        limiter
+        for policy in service.policies
+        for limiter in (policy.limiter, policy.fallback)
+        if isinstance(limiter, InMemoryLimiter)
+    ]
+    service.metrics.gauge("ratelimit_memory_keys", lambda: sum(len(lim) for lim in in_memory))
 
     warn_about_unreachable_weights(service, {"/api/report": EXPENSIVE_WEIGHT})
 

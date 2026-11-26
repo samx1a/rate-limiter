@@ -184,3 +184,12 @@ def test_metrics_token_protects_metrics_and_stays_out_of_repr() -> None:
     assert ok.status_code == 200 and "ratelimit_check_duration_ms" in ok.text
     assert "s3cret" not in repr(settings)
     assert "s3cret" not in c.get("/api/info").text
+
+
+def test_metrics_report_keys_held_in_memory() -> None:
+    c = client()
+    assert "ratelimit_memory_keys 0" in c.get("/api/metrics").text
+    for user in ("a", "b", "c"):
+        get(c, user=user)
+    # 1 IP key + 3 user keys
+    assert "ratelimit_memory_keys 4" in c.get("/api/metrics").text

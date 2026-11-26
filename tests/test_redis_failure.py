@@ -156,3 +156,10 @@ def test_503_retry_after_matches_the_breaker_cooldown() -> None:
     response = c.get("/api/hello")
     assert response.status_code == 503
     assert response.headers["Retry-After"] in {"6", "7"}  # not "1"
+
+
+def test_memory_keys_count_the_fallback_during_an_outage() -> None:
+    c = TestClient(create_app(settings(fail_open=False, local_fallback=True)))
+    assert "ratelimit_memory_keys 0" in c.get("/api/metrics").text
+    c.get("/api/hello", headers={"x-user-id": "alice"})
+    assert "ratelimit_memory_keys 2" in c.get("/api/metrics").text  # IP + alice
