@@ -6,6 +6,7 @@ runtime, and string annotations cannot see aliases defined inside ``create_app``
 
 import base64
 import hashlib
+import hmac
 import logging
 import re
 import time
@@ -314,8 +315,19 @@ def create_app(
         return body
 
     @app.get("/api/metrics", response_class=PlainTextResponse)
-    def metrics() -> PlainTextResponse:
+    def metrics(request: Request) -> PlainTextResponse:
         """Prometheus text format. Per process: each server instance has its own."""
+        if settings.metrics_token is not None:
+            sent = request.headers.get("authorization", "")
+            expected = f"Bearer {settings.metrics_token}"
+            # compare_digest takes the same time however much of the token matches, so
+            # response timing can't be used to guess it one character at a time.
+            if not hmac.compare_digest(sent.encode(), expected.encode()):
+                raise HTTPException(
+                    status_code=401,
+                    detail="metrics need a bearer token",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
         return PlainTextResponse(service.metrics.render(), media_type="text/plain; version=0.0.4")
 
     @app.get("/api/info")

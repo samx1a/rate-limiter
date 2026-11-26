@@ -173,3 +173,14 @@ def test_one_version_everywhere() -> None:
     assert c.get("/api/info").json()["version"] == ratelimit.__version__
     assert c.get("/openapi.json").json()["info"]["version"] == ratelimit.__version__
     assert version("rate-limiter") == ratelimit.__version__  # what pyproject builds
+
+
+def test_metrics_token_protects_metrics_and_stays_out_of_repr() -> None:
+    settings = Settings(metrics_token="s3cret")
+    c = TestClient(create_app(settings))
+    assert c.get("/api/metrics").status_code == 401
+    assert c.get("/api/metrics", headers={"authorization": "Bearer wrong"}).status_code == 401
+    ok = c.get("/api/metrics", headers={"authorization": "Bearer s3cret"})
+    assert ok.status_code == 200 and "ratelimit_check_duration_ms" in ok.text
+    assert "s3cret" not in repr(settings)
+    assert "s3cret" not in c.get("/api/info").text

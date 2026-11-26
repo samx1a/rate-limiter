@@ -248,6 +248,7 @@ limit.
 | `TRUSTED_IP_HEADER` | none | proxy header to read the client IP from (`x-real-ip` on Vercel) |
 | `TRUSTED_PROXY_HOPS` | `1` | how many of your proxies append to that header; the client IP is that many entries from the right |
 | `IP_ALLOWLIST` | none | IPs or CIDR ranges that skip limiting, e.g. `10.0.0.0/8, 192.0.2.7` |
+| `METRICS_TOKEN` | none | if set, `/api/metrics` needs `Authorization: Bearer <token>` |
 | `LOCAL_FALLBACK` | `true` | when Redis is unreachable, limit per server from memory |
 | `FAIL_OPEN` | `true` | with no local fallback, allow requests when Redis is unreachable |
 | `REDIS_TIMEOUT_MS` | `250` | per-command Redis timeout |

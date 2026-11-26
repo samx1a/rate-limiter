@@ -5,7 +5,7 @@ from __future__ import annotations
 import ipaddress
 import os
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 from typing import TypeVar
 
@@ -66,6 +66,8 @@ class Settings:
     # While Redis is down: limit per server from memory (local_fallback), else let
     # everything through (fail_open) or refuse with 503.
     local_fallback: bool = True
+    # If set, /api/metrics needs "Authorization: Bearer <token>". Unset: public.
+    metrics_token: str | None = field(default=None, repr=False)  # keep it out of logs
     fail_open: bool = True
 
     def __post_init__(self) -> None:
@@ -123,6 +125,7 @@ class Settings:
                 ),
                 ip_allowlist=read("IP_ALLOWLIST", _networks, defaults.ip_allowlist),
                 local_fallback=read("LOCAL_FALLBACK", _flag, defaults.local_fallback),
+                metrics_token=env.get("METRICS_TOKEN") or None,
                 fail_open=read("FAIL_OPEN", _flag, defaults.fail_open),
             )
         except ConfigError:
