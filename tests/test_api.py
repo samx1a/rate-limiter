@@ -193,3 +193,12 @@ def test_metrics_report_keys_held_in_memory() -> None:
         get(c, user=user)
     # 1 IP key + 3 user keys
     assert "ratelimit_memory_keys 4" in c.get("/api/metrics").text
+
+
+def test_malformed_user_headers_still_spend_the_ip_limit() -> None:
+    c = client(ip_limit=3)
+    bad = {"x-real-ip": "203.0.113.50", "x-user-id": "not valid!"}
+    codes = [c.get("/api/hello", headers=bad).status_code for _ in range(5)]
+    assert codes == [400, 400, 400, 429, 429]
+    # and the IP really is used up for normal requests too
+    assert get(c, user="alice", ip="203.0.113.50") == 429

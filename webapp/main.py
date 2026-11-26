@@ -223,17 +223,33 @@ def create_app(
     app.state.service = service
 
     def identify(request: Request) -> Identity:
-        try:
-            user = user_from_headers(request.headers)
-        except InvalidIdentity as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
         peer = request.client.host if request.client else None
         ip = client_ip(
             peer, request.headers, settings.trusted_ip_header, settings.trusted_proxy_hops
         )
         request.state.allowlisted = is_allowlisted(ip, settings.ip_allowlist)
         request.state.client_ip = ip  # the real address; Identity.ip is what's limited
+        try:
+            user = user_from_headers(request.headers)
+        except InvalidIdentity as exc:
+            # Still count it against the IP. Otherwise a malformed header is a free pass:
+            # every such request gets a 400 without ever touching a limit.
+            if not request.state.allowlisted:
+                reject_if_ip_limited(Identity(ip=limit_subject(ip)))
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return Identity(ip=limit_subject(ip), user=user)
+
+    def reject_if_ip_limited(anonymous: Identity) -> None:
+        try:
+            verdict = service.check(anonymous)  # no user, so only IP policies apply
+        except LimiterUnavailable:
+            return  # it's getting a 400 anyway
+        if not verdict.allowed:
+            raise HTTPException(
+                status_code=429,
+                detail={"error": "rate_limited", "message": "Too many requests."},
+                headers=rate_limit_headers(verdict, service.policies),
+            )
 
     # A plain (sync) dependency: FastAPI runs it in a worker thread, so a slow
     # limiter store never blocks the event loop.
