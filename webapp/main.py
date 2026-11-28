@@ -23,7 +23,7 @@ from ratelimit import __version__
 from ratelimit.algorithms.base import InMemoryLimiter
 from ratelimit.breaker import BreakerState, CircuitBreaker
 from ratelimit.decision import LimiterUnavailable, RateLimiter
-from ratelimit.limits import LimitSpec, build_limiter
+from ratelimit.limits import Algorithm, LimitSpec, build_limiter
 from ratelimit.redis_limiters import build_redis_limiter, connect, hit_many
 from ratelimit.service import BatchHit, Identity, Policy, RateLimitService, Scope, Verdict
 from webapp.headers import rate_limit_headers, whole_seconds
@@ -119,8 +119,8 @@ def build_service(
     client: redis.Redis | None = None,
     breaker: CircuitBreaker | None = None,
 ) -> RateLimitService:
-    def local(spec: LimitSpec) -> RateLimiter:
-        return build_limiter(settings.algorithm, spec)
+    def local(algorithm: Algorithm, spec: LimitSpec) -> RateLimiter:
+        return build_limiter(algorithm, spec)
 
     if settings.backend is Backend.REDIS:
         client = client or redis_client(settings)
@@ -129,26 +129,37 @@ def build_service(
         # the user check too.
         breaker = breaker or CircuitBreaker(settings.breaker_threshold, settings.breaker_cooldown)
 
-        def make(spec: LimitSpec) -> RateLimiter:
+        def make(algorithm: Algorithm, spec: LimitSpec) -> RateLimiter:
             return build_redis_limiter(
-                settings.algorithm, spec, client, prefix=settings.key_prefix, breaker=breaker
+                algorithm, spec, client, prefix=settings.key_prefix, breaker=breaker
             )
 
-        def fallback(spec: LimitSpec) -> RateLimiter | None:
-            return local(spec) if settings.local_fallback else None
+        def fallback(algorithm: Algorithm, spec: LimitSpec) -> RateLimiter | None:
+            return local(algorithm, spec) if settings.local_fallback else None
 
     else:
         make = local
 
-        def fallback(spec: LimitSpec) -> RateLimiter | None:
+        def fallback(algorithm: Algorithm, spec: LimitSpec) -> RateLimiter | None:
             return None  # memory can't be "down"
 
+    algorithms = settings.algorithms
     batch: BatchHit | None = None
-    if settings.backend is Backend.REDIS and settings.redis_batch:
+    # One script checks every key with the same algorithm, so batching needs the IP and
+    # user limits to share one.
+    one_algorithm = len(set(algorithms.values())) == 1
+    if settings.backend is Backend.REDIS and settings.redis_batch and one_algorithm:
         batch = hit_many  # IP + user limit in one round trip, all or nothing
 
     def policy(name: str, scope: Scope, spec: LimitSpec) -> Policy:
-        return Policy(name, scope, make(spec), period=spec.period, fallback=fallback(spec))
+        algorithm = algorithms[name]
+        return Policy(
+            name,
+            scope,
+            make(algorithm, spec),
+            period=spec.period,
+            fallback=fallback(algorithm, spec),
+        )
 
     return RateLimitService(
         [
@@ -369,7 +380,10 @@ def create_app(
             "backend": str(settings.backend),
             "algorithm": str(settings.algorithm),
             "limits": {"ip": str(settings.ip_limit), "user": str(settings.user_limit)},
-            "redis_batch": settings.backend is Backend.REDIS and settings.redis_batch,
+            "algorithms": {name: str(a) for name, a in settings.algorithms.items()},
+            "redis_batch": settings.backend is Backend.REDIS
+            and settings.redis_batch
+            and len(set(settings.algorithms.values())) == 1,
             "local_fallback": settings.local_fallback,
             "fail_open": settings.fail_open,
         }

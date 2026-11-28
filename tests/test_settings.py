@@ -18,6 +18,8 @@ def test_every_variable_is_read() -> None:
             "BREAKER_THRESHOLD": "5",
             "BREAKER_COOLDOWN_MS": "2000",
             "RATE_LIMIT_ALGORITHM": "fixed_window",
+            "IP_ALGORITHM": "token_bucket",
+            "USER_ALGORITHM": "sliding_counter",
             "IP_LIMIT": "100/1m",
             "USER_LIMIT": "5/s",
             "TRUSTED_IP_HEADER": "x-real-ip",
@@ -36,6 +38,8 @@ def test_every_variable_is_read() -> None:
         breaker_threshold=5,
         breaker_cooldown=2.0,
         algorithm=Algorithm.FIXED_WINDOW,
+        ip_algorithm=Algorithm.TOKEN_BUCKET,
+        user_algorithm=Algorithm.SLIDING_COUNTER,
         ip_limit=LimitSpec(100, 60),
         user_limit=LimitSpec(5, 1),
         trusted_ip_header="x-real-ip",
@@ -110,3 +114,8 @@ def test_ip_allowlist() -> None:
     )
     with pytest.raises(ConfigError, match=r"IP_ALLOWLIST='10\.0\.0\.1/8': expected IPs or CIDR"):
         Settings.from_env({"IP_ALLOWLIST": "10.0.0.1/8"})  # host bits set: likely a typo
+
+
+def test_counter_is_rejected_on_redis_for_any_limit() -> None:
+    with pytest.raises(ConfigError, match="no Redis version"):
+        Settings.from_env({"REDIS_URL": "redis://x:1/0", "USER_ALGORITHM": "counter"})

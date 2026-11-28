@@ -243,6 +243,7 @@ limit.
 | `RATE_LIMIT_BACKEND` | `redis` if `REDIS_URL` is set, else `memory` | where the counts live |
 | `REDIS_URL` | none | Redis connection string (`rediss://` for TLS) |
 | `RATE_LIMIT_ALGORITHM` | `token_bucket` | `fixed_window`, `sliding_window`, `sliding_counter` or `token_bucket` |
+| `IP_ALGORITHM`, `USER_ALGORITHM` | same as above | use a different algorithm for one limit (Redis batching needs them to match) |
 | `IP_LIMIT` | `60/1m` | per-IP limit, written like `10/s`, `100/1m`, `5/30s` |
 | `USER_LIMIT` | `10/10s` | per-user limit |
 | `TRUSTED_IP_HEADER` | none | proxy header to read the client IP from (`x-real-ip` on Vercel) |

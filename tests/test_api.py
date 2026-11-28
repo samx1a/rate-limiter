@@ -202,3 +202,17 @@ def test_malformed_user_headers_still_spend_the_ip_limit() -> None:
     assert codes == [400, 400, 400, 429, 429]
     # and the IP really is used up for normal requests too
     assert get(c, user="alice", ip="203.0.113.50") == 429
+
+
+def test_each_limit_can_use_its_own_algorithm() -> None:
+    from ratelimit.algorithms.fixed_window import FixedWindow
+    from ratelimit.algorithms.token_bucket import TokenBucket
+    from ratelimit.limits import Algorithm
+
+    settings = Settings(ip_algorithm=Algorithm.FIXED_WINDOW)
+    app = create_app(settings)
+    limiters = {p.name: p.limiter for p in app.state.service.policies}
+    assert isinstance(limiters["ip"], FixedWindow)
+    assert isinstance(limiters["user"], TokenBucket)  # the default
+    info = TestClient(app).get("/api/info").json()
+    assert info["algorithms"] == {"ip": "fixed_window", "user": "token_bucket"}

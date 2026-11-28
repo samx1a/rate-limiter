@@ -109,3 +109,21 @@ def test_connection_pool_is_capped_and_waits_for_a_free_connection(
     assert all(d.allowed for d in decisions)  # 16 threads shared 2 connections fine
     assert len(client.connection_pool._connections) <= 2  # type: ignore[attr-defined]
     client.close()
+
+
+def test_mixed_algorithms_on_redis_check_one_by_one(redis_client: redis.Redis, prefix: str) -> None:
+    from ratelimit.limits import Algorithm
+
+    settings = Settings(
+        backend=Backend.REDIS,
+        redis_url=REDIS_URL,
+        key_prefix=prefix,
+        ip_algorithm=Algorithm.FIXED_WINDOW,
+        user_algorithm=Algorithm.SLIDING_WINDOW,
+        user_limit=LimitSpec(2, 60),
+        redis_timeout=5.0,
+    )
+    c = TestClient(create_app(settings))
+    assert c.get("/api/info").json()["redis_batch"] is False  # one script can't do both
+    codes = [c.get("/api/hello", headers={"x-user-id": "mixed"}).status_code for _ in range(3)]
+    assert codes == [200, 200, 429]

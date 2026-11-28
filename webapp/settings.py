@@ -54,6 +54,10 @@ class Settings:
     # raise it when Redis is far away, e.g. running tests against a cloud database.
     redis_timeout: float = 0.25
     algorithm: Algorithm = Algorithm.TOKEN_BUCKET
+    # Per-limit overrides, e.g. a cheap fixed window for the IP flood limit and a token
+    # bucket for users. None means "use algorithm".
+    ip_algorithm: Algorithm | None = None
+    user_algorithm: Algorithm | None = None
     ip_limit: LimitSpec = DEFAULT_IP_LIMIT
     user_limit: LimitSpec = DEFAULT_USER_LIMIT
     trusted_ip_header: str | None = None
@@ -73,12 +77,20 @@ class Settings:
     def __post_init__(self) -> None:
         if self.backend is Backend.REDIS and not self.redis_url:
             raise ValueError("RATE_LIMIT_BACKEND=redis needs REDIS_URL")
-        if self.backend is Backend.REDIS and self.algorithm is Algorithm.COUNTER:
+        if self.backend is Backend.REDIS and Algorithm.COUNTER in self.algorithms.values():
             raise ValueError("the naive counter has no Redis version")
         if self.redis_timeout <= 0:
             raise ValueError("redis_timeout must be > 0 seconds")
         if self.breaker_threshold < 1 or self.breaker_cooldown <= 0:
             raise ValueError("breaker_threshold must be >= 1 and breaker_cooldown > 0")
+
+    @property
+    def algorithms(self) -> dict[str, Algorithm]:
+        """The algorithm each limit actually uses."""
+        return {
+            "ip": self.ip_algorithm or self.algorithm,
+            "user": self.user_algorithm or self.algorithm,
+        }
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -117,6 +129,8 @@ class Settings:
                 ),
                 breaker_cooldown=read("BREAKER_COOLDOWN_MS", _millis, defaults.breaker_cooldown),
                 algorithm=read("RATE_LIMIT_ALGORITHM", _choice(Algorithm), defaults.algorithm),
+                ip_algorithm=read("IP_ALGORITHM", _choice(Algorithm), None),
+                user_algorithm=read("USER_ALGORITHM", _choice(Algorithm), None),
                 ip_limit=read("IP_LIMIT", parse_limit, defaults.ip_limit),
                 user_limit=read("USER_LIMIT", parse_limit, defaults.user_limit),
                 trusted_ip_header=env.get("TRUSTED_IP_HEADER") or None,
