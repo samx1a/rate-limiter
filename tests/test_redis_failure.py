@@ -163,3 +163,15 @@ def test_memory_keys_count_the_fallback_during_an_outage() -> None:
     assert "ratelimit_memory_keys 0" in c.get("/api/metrics").text
     c.get("/api/hello", headers={"x-user-id": "alice"})
     assert "ratelimit_memory_keys 2" in c.get("/api/metrics").text  # IP + alice
+
+
+def test_an_unreachable_host_fails_within_one_timeout() -> None:
+    """10.255.255.1 is unroutable, so the connect times out rather than being refused.
+    That's the slow kind of outage; it must cost one timeout, not one per retry."""
+    client = connect("redis://10.255.255.1:6379/0", timeout=0.25, connect_timeout=0.25)
+    bucket = RedisTokenBucket(client, 5, 1.0)
+    started = time.monotonic()
+    with pytest.raises(LimiterUnavailable):
+        bucket.hit("k")
+    assert time.monotonic() - started < 0.6
+    assert client.connection_pool.connection_kwargs["retry"].get_retries() == 0

@@ -17,6 +17,8 @@ from importlib import resources
 from typing import Any, TypeVar
 
 import redis
+from redis.backoff import NoBackoff
+from redis.retry import Retry
 
 from ratelimit.breaker import CircuitBreaker
 from ratelimit.decision import Decision, LimiterUnavailable, RateLimiter, validate_cost
@@ -264,5 +266,9 @@ def connect(
         socket_timeout=timeout,
         socket_connect_timeout=connect_timeout,
         health_check_interval=30,
+        # No retries, on purpose and spelled out: a retry multiplies the timeout on the
+        # request path, and the circuit breaker already handles "Redis is down". Some
+        # redis-py versions default to retrying, so this must not be left implicit.
+        retry=Retry(NoBackoff(), 0),
     )
     return redis.Redis.from_pool(pool)  # from_pool: close() also closes the pool
