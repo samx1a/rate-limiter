@@ -49,7 +49,8 @@ def test_fail_closed_returns_503() -> None:
     response = c.get("/api/hello")
     assert response.status_code == 503
     assert response.headers["Retry-After"] == "1"
-    assert response.json()["detail"]["error"] == "limiter_unavailable"
+    assert response.json()["error"] == "limiter_unavailable"
+    assert response.headers["Content-Type"] == "application/problem+json"
 
 
 def test_local_fallback_keeps_limiting_when_redis_is_down() -> None:
@@ -59,7 +60,7 @@ def test_local_fallback_keeps_limiting_when_redis_is_down() -> None:
     # A new user from the same IP: the per-IP limit is held in memory too.
     response = c.get("/api/hello", headers={"x-user-id": "bob"})
     assert response.status_code == 429
-    assert response.json()["detail"]["policy"] == "ip"
+    assert response.json()["policy"] == "ip"
 
 
 def test_an_outage_fails_fast() -> None:

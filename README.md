@@ -159,8 +159,12 @@ ratelimit-reset: 10
 ratelimit-policy: 60;w=60;name="ip", 10;w=10;name="user"
 retry-after: 1
 
-{"detail":{"error":"rate_limited","message":"Too many requests. Slow down and retry later.","policy":"user","retry_after":1}}
+{"type":"/problems/rate-limited","title":"Too Many Requests","status":429,"detail":"Too many requests. Slow down and retry later.","error":"rate_limited","policy":"user","retry_after":1}
 ```
+
+Errors use the standard "Problem Details" format (RFC 9457, `application/problem+json`),
+so generic HTTP tools know how to read them. `error` is the same thing as `type` but
+as a plain code that's easier to switch on.
 
 [`examples/client.py`](examples/client.py) shows how a client should handle this:
 wait `Retry-After` seconds plus a bit of random jitter (so a crowd of blocked clients

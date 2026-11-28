@@ -111,8 +111,8 @@ def test_openapi_documents_the_429() -> None:
         responses = schema["paths"][path]["get"]["responses"]
         assert {"200", "429", "503"} <= set(responses)
         assert "Retry-After" in responses["429"]["headers"]
-        example = responses["429"]["content"]["application/json"]["example"]
-        assert example["detail"]["error"] == "rate_limited"
+        example = responses["429"]["content"]["application/problem+json"]["example"]
+        assert example["error"] == "rate_limited" and example["status"] == 429
 
 
 def test_documented_429_matches_a_real_one() -> None:
@@ -120,9 +120,9 @@ def test_documented_429_matches_a_real_one() -> None:
     get(c)
     real = c.get("/api/hello", headers={"x-real-ip": "203.0.113.1", "x-user-id": "alice"})
     documented = c.get("/openapi.json").json()["paths"]["/api/hello"]["get"]["responses"]["429"]
-    example = documented["content"]["application/json"]["example"]
+    example = documented["content"]["application/problem+json"]["example"]
+    assert real.headers["Content-Type"] == "application/problem+json"
     assert real.json().keys() == example.keys()
-    assert real.json()["detail"].keys() == example["detail"].keys()
     assert all(name in real.headers for name in documented["headers"])  # case-insensitive
 
 
@@ -216,3 +216,12 @@ def test_each_limit_can_use_its_own_algorithm() -> None:
     assert isinstance(limiters["user"], TokenBucket)  # the default
     info = TestClient(app).get("/api/info").json()
     assert info["algorithms"] == {"ip": "fixed_window", "user": "token_bucket"}
+
+
+def test_invalid_user_header_is_a_problem_document() -> None:
+    response = client().get("/api/hello", headers={"x-user-id": "no spaces allowed"})
+    assert response.status_code == 400
+    assert response.headers["Content-Type"] == "application/problem+json"
+    body = response.json()
+    assert body["type"] == "/problems/invalid-user-id" and body["status"] == 400
+    assert "X-User-Id must be" in body["detail"]

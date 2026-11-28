@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import redis
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from ratelimit import __version__
@@ -34,12 +34,37 @@ from webapp.identity import (
     limit_subject,
     user_from_headers,
 )
+from webapp.problems import Problem, openapi_example
+from webapp.problems import install as install_problems
 from webapp.settings import Backend, Settings
 from webapp.simulate import Scenario, simulate
 
 log = logging.getLogger(__name__)
 
 EXPENSIVE_WEIGHT = 5
+
+
+def too_many_requests(
+    policy: str | None, retry_after: int | None, headers: dict[str, str]
+) -> Problem:
+    return Problem(
+        429,
+        "rate_limited",
+        "Too many requests. Slow down and retry later.",
+        headers=headers,
+        policy=policy,
+        retry_after=retry_after,
+    )
+
+
+def limiter_unavailable(retry_after: int) -> Problem:
+    return Problem(
+        503,
+        "limiter_unavailable",
+        "The rate limit store is unreachable. Try again shortly.",
+        headers={"Retry-After": str(retry_after)},
+        retry_after=retry_after,
+    )
 
 
 def _header(description: str) -> dict[str, Any]:
@@ -56,22 +81,12 @@ LIMITED_RESPONSES: dict[int | str, dict[str, Any]] = {
     429: {
         "description": "Rate limited. Wait Retry-After seconds before trying again.",
         "headers": {**_LIMIT_HEADERS, "Retry-After": _header("Seconds to wait")},
-        "content": {
-            "application/json": {
-                "example": {
-                    "detail": {
-                        "error": "rate_limited",
-                        "message": "Too many requests. Slow down and retry later.",
-                        "policy": "user",
-                        "retry_after": 1,
-                    }
-                }
-            }
-        },
+        "content": openapi_example(too_many_requests("user", 1, {})),
     },
     503: {
         "description": "The limit store is down and FAIL_OPEN=false (no local fallback).",
         "headers": {"Retry-After": _header("Seconds to wait")},
+        "content": openapi_example(limiter_unavailable(5)),
     },
 }
 DEMO_PAGE = (Path(__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
@@ -222,6 +237,7 @@ def create_app(
             client.close()  # give the pooled connections back on shutdown
 
     app = FastAPI(title="rate-limiter", version=__version__, lifespan=lifespan)
+    install_problems(app)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next: Any) -> Any:
@@ -247,7 +263,7 @@ def create_app(
             # every such request gets a 400 without ever touching a limit.
             if not request.state.allowlisted:
                 reject_if_ip_limited(Identity(ip=limit_subject(ip)))
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise Problem(400, "invalid_user_id", str(exc)) from exc
         return Identity(ip=limit_subject(ip), user=user)
 
     def reject_if_ip_limited(anonymous: Identity) -> None:
@@ -256,11 +272,8 @@ def create_app(
         except LimiterUnavailable:
             return  # it's getting a 400 anyway
         if not verdict.allowed:
-            raise HTTPException(
-                status_code=429,
-                detail={"error": "rate_limited", "message": "Too many requests."},
-                headers=rate_limit_headers(verdict, service.policies),
-            )
+            headers = rate_limit_headers(verdict, service.policies)
+            raise too_many_requests("ip", int(headers.get("Retry-After", "0")) or None, headers)
 
     # A plain (sync) dependency: FastAPI runs it in a worker thread, so a slow
     # limiter store never blocks the event loop.
@@ -281,11 +294,7 @@ def create_app(
                 # While the breaker is open nothing will change until its cooldown
                 # ends, so say exactly that instead of inviting a retry every second.
                 wait = breaker.retry_after() if breaker is not None else 0.0
-                raise HTTPException(
-                    status_code=503,
-                    detail={"error": "limiter_unavailable", "message": "Try again shortly."},
-                    headers={"Retry-After": str(max(1, whole_seconds(wait)))},
-                ) from exc
+                raise limiter_unavailable(max(1, whole_seconds(wait))) from exc
             headers = rate_limit_headers(verdict, service.policies)
             # How long the limit check took, visible in browser dev tools. This is how the
             # Redis round trip was measured in production (see docs/LOAD_TEST.md).
@@ -294,15 +303,10 @@ def create_app(
             service.metrics.observe_latency(elapsed_ms)
             if not verdict.allowed:
                 binding = verdict.binding
-                raise HTTPException(
-                    status_code=429,
-                    detail={
-                        "error": "rate_limited",
-                        "message": "Too many requests. Slow down and retry later.",
-                        "policy": binding.policy.name if binding else None,
-                        "retry_after": int(headers.get("Retry-After", "0")) or None,
-                    },
-                    headers=headers,
+                raise too_many_requests(
+                    binding.policy.name if binding else None,
+                    int(headers.get("Retry-After", "0")) or None,
+                    headers,
                 )
             response.headers.update(headers)
             return verdict
@@ -366,9 +370,10 @@ def create_app(
             # compare_digest takes the same time however much of the token matches, so
             # response timing can't be used to guess it one character at a time.
             if not hmac.compare_digest(sent.encode(), expected.encode()):
-                raise HTTPException(
-                    status_code=401,
-                    detail="metrics need a bearer token",
+                raise Problem(
+                    401,
+                    "unauthorized",
+                    "metrics need a bearer token",
                     headers={"WWW-Authenticate": "Bearer"},
                 )
         return PlainTextResponse(service.metrics.render(), media_type="text/plain; version=0.0.4")

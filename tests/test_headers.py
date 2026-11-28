@@ -44,9 +44,13 @@ def test_blocked_response_is_429_with_retry_after_and_json_body() -> None:
     assert blocked.headers["RateLimit-Remaining"] == "0"
     assert blocked.headers["Retry-After"] == "15"  # 1 token at 2 per 30s
     assert blocked.headers["RateLimit-Reset"] == "30"
-    assert blocked.json()["detail"] == {
+    assert blocked.headers["Content-Type"] == "application/problem+json"
+    assert blocked.json() == {
+        "type": "/problems/rate-limited",
+        "title": "Too Many Requests",
+        "status": 429,
+        "detail": "Too many requests. Slow down and retry later.",
         "error": "rate_limited",
-        "message": "Too many requests. Slow down and retry later.",
         "policy": "user",
         "retry_after": 15,
     }
@@ -58,7 +62,7 @@ def test_ip_block_reports_the_ip_policy() -> None:
     blocked = c.get("/api/hello", headers=HEADERS)
     assert blocked.status_code == 429
     assert blocked.headers["RateLimit-Limit"] == "1"
-    assert blocked.json()["detail"]["policy"] == "ip"
+    assert blocked.json()["policy"] == "ip"
 
 
 def test_unlimited_routes_have_no_headers() -> None:
